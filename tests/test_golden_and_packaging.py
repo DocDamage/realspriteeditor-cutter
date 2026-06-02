@@ -97,6 +97,32 @@ class GoldenAndPackagingTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue((target / "tools" / "cut_tileset_sprites.py").exists())
             self.assertTrue((target / "launch_sprite_tool.bat").exists())
+            self.assertTrue((target / "requirements-ui.txt").exists())
+            self.assertTrue((target / "requirements-dev.txt").exists())
+            self.assertTrue((target / "skills" / "codex" / "spritecut-pipeline" / "SKILL.md").exists())
+
+    def test_github_workflows_run_tests_compile_and_release_packaging(self) -> None:
+        ci = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+        release = REPO_ROOT / ".github" / "workflows" / "release.yml"
+
+        self.assertTrue(ci.exists(), str(ci))
+        self.assertTrue(release.exists(), str(release))
+
+        ci_text = ci.read_text(encoding="utf-8")
+        release_text = release.read_text(encoding="utf-8")
+        self.assertIn("python -m unittest discover -s tests -p \"test_*.py\"", ci_text)
+        self.assertIn("python -m py_compile", ci_text)
+        self.assertIn("tools/package_sprite_tool.ps1", ci_text)
+        self.assertIn("actions/upload-artifact", release_text)
+        self.assertIn("sprite-sheet-processor", release_text)
+
+    def test_dev_requirements_document_test_dependencies(self) -> None:
+        requirements = REPO_ROOT / "requirements-dev.txt"
+
+        self.assertTrue(requirements.exists(), str(requirements))
+        text = requirements.read_text(encoding="utf-8").lower()
+        self.assertIn("pillow", text)
+        self.assertIn("numpy", text)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Compile Python modules
+        run: python -m py_compile tools/cut_tileset_sprites.py tools/sprite_processing.py tools/sprite_atlas.py tools/sprite_manifest.py tools/sprite_reports.py tools/sprite_sheet_tool_ui.py tools/sprite_project.py tools/sprite_studio.py tools/sprite_editor.py tools/autotile_tools.py tools/sprite_ide_api.py tools/golden_sprite_fixtures.py
+
+      - name: Package smoke test
+        if: matrix.os == 'windows-latest'
+        run: ./tools/package_sprite_tool.ps1 -OutDir dist/sprite-sheet-processor
+        shell: pwsh

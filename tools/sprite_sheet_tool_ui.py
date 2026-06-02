@@ -23,14 +23,16 @@ except ModuleNotFoundError:  # Keep helper tests importable when the GUI depende
 try:
     from tools.autotile_tools import write_autotile_package
     from tools.cut_tileset_sprites import BUILT_IN_PRESETS, DetectionSettings, detect_background, extract_detections, grouped_components, is_inside_spritecut_output
-    from tools.sprite_editor import SpriteEditSession, color_wheel_palette, extract_palette, write_edit_package
+    from tools.golden_sprite_fixtures import create_golden_pack
+    from tools.sprite_editor import SpriteEditSession, color_wheel_palette, extract_palette, write_edit_package, write_palette_variant_package
     from tools.sprite_project import approve_sprite, load_project, merge_sprites, redo_last_edit, reject_sprite, render_project_outputs, save_project, split_sprite, undo_last_edit, update_sprite
     from tools.sprite_studio import apply_taxonomy_rules, asset_browser_index, batch_health_score, build_engine_import_plans, build_review_dashboard, diff_projects, generate_collision_profiles, review_and_apply_project, search_assets, train_preset_from_project
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tools.autotile_tools import write_autotile_package
     from tools.cut_tileset_sprites import BUILT_IN_PRESETS, DetectionSettings, detect_background, extract_detections, grouped_components, is_inside_spritecut_output
-    from tools.sprite_editor import SpriteEditSession, color_wheel_palette, extract_palette, write_edit_package
+    from tools.golden_sprite_fixtures import create_golden_pack
+    from tools.sprite_editor import SpriteEditSession, color_wheel_palette, extract_palette, write_edit_package, write_palette_variant_package
     from tools.sprite_project import approve_sprite, load_project, merge_sprites, redo_last_edit, reject_sprite, render_project_outputs, save_project, split_sprite, undo_last_edit, update_sprite
     from tools.sprite_studio import apply_taxonomy_rules, asset_browser_index, batch_health_score, build_engine_import_plans, build_review_dashboard, diff_projects, generate_collision_profiles, review_and_apply_project, search_assets, train_preset_from_project
 
@@ -50,6 +52,7 @@ TOOLTIP_TEXT: dict[str, str] = {
     "add_folder": "Choose a folder containing sprite sheets or nested asset folders.",
     "add_file": "Choose a single sprite sheet image when you want to process just one file.",
     "refresh_files": "Rescan the selected input path and rebuild the sheet list and preview.",
+    "create_sample_pack": "Create a small repeatable sample sprite pack for first-run demos and cutter smoke tests.",
     "file_list": "Detected source sheets. Select a sheet to preview auto-detected sprite regions.",
     "preview_accessibility": "Preview the detection overlay in normal or color-vision simulation modes.",
     "process": "Run the cutter with the current settings and write sprites, manifests, reports, and project files.",
@@ -89,6 +92,7 @@ TOOLTIP_TEXT: dict[str, str] = {
     "save_preset": "Save the current visible settings as a reusable JSON preset.",
     "load_preset": "Load a JSON preset and apply it to the current controls.",
     "load_project": "Open a project.spritecut.json file for manual review and corrections.",
+    "recent_projects": "Recently loaded SpriteCut project files that still exist on disk.",
     "save_project": "Save the current project edits without regenerating output images.",
     "undo": "Undo the last project edit, including structural split and merge edits.",
     "redo": "Redo the last project edit after an undo.",
@@ -129,9 +133,19 @@ TOOLTIP_TEXT: dict[str, str] = {
     "editor_source_color": "Source color to replace, written as a hex color such as #ff0000.",
     "editor_target_color": "Target replacement color, written as a hex color such as #00ffff.",
     "editor_swap_colors": "Replace the source color with the target color while preserving transparent pixels.",
+    "editor_undo": "Undo the most recent non-destructive sprite edit in the current editor session.",
+    "editor_redo": "Redo the most recently undone sprite edit in the current editor session.",
+    "editor_crop_rect": "Crop rectangle for the current sprite as x,y,width,height or four space-separated numbers.",
+    "editor_resize_size": "Resize target for the current sprite as width x height or two comma-separated numbers.",
+    "editor_flip_axis": "Flip the current sprite horizontally or vertically using nearest-neighbor pixel handling.",
+    "editor_crop": "Apply the crop rectangle to all layers in the current editor session.",
+    "editor_resize": "Resize all layers in the current editor session using nearest-neighbor pixel handling.",
+    "editor_flip": "Flip all layers in the current editor session across the selected axis.",
+    "editor_rotate": "Rotate all layers in the current editor session by 90 degrees.",
     "editor_hue_degrees": "Hue rotation in degrees for color-wheel style sprite recoloring.",
     "editor_hue_shift": "Apply hue, saturation, and value changes to the current sprite session.",
     "editor_color_wheel": "Preview color harmony suggestions such as complementary, analogous, triadic, or tetradic.",
+    "editor_palette_variants": "Write colorway PNGs, manifest JSON, and contact sheet using the selected harmony colors.",
     "editor_autotile_name": "Name used when writing a 16-mask cardinal autotile sheet and rule metadata.",
     "editor_generate_autotile": "Generate a 16-variant autotile package from the current edited sprite.",
     "editor_ide_api": "Show IDE-callable JSON actions for scripts, editors, and external tools.",
@@ -582,8 +596,98 @@ def editor_color_wheel_preview(base: str, harmony: str = "complementary") -> str
     return f"{wheel['harmony']} | colors={', '.join(wheel['colors'])} | ramp={', '.join(wheel['ramp'])}"
 
 
+def _editor_numbers(text: str, expected: int, label: str) -> tuple[int, ...]:
+    parts = [part for part in re.split(r"[,\sxX]+", text.strip()) if part]
+    if len(parts) != expected:
+        raise ValueError(f"{label} must contain {expected} numbers.")
+    values = tuple(int(part) for part in parts)
+    if any(value < 0 for value in values):
+        raise ValueError(f"{label} cannot contain negative values.")
+    return values
+
+
+def editor_parse_rect_text(text: str) -> tuple[int, int, int, int]:
+    x, y, width, height = _editor_numbers(text, 4, "Crop rectangle")
+    if width < 1 or height < 1:
+        raise ValueError("Crop rectangle width and height must be at least 1.")
+    return x, y, width, height
+
+
+def editor_parse_size_text(text: str) -> tuple[int, int]:
+    width, height = _editor_numbers(text, 2, "Resize size")
+    if width < 1 or height < 1:
+        raise ValueError("Resize width and height must be at least 1.")
+    return width, height
+
+
+def editor_variant_package(
+    session: SpriteEditSession,
+    output_dir: Path,
+    *,
+    name: str,
+    base_color: str,
+    harmony: str,
+) -> dict[str, Any]:
+    wheel = color_wheel_palette(base_color, harmony=harmony, steps=5)
+    colors = [str(color) for color in wheel.get("colors", [])]
+    targets = colors[:2] if len(colors) >= 2 else colors
+    variants = [
+        {"name": f"{harmony}_{index + 1}", "swaps": {base_color: target}}
+        for index, target in enumerate(targets)
+    ]
+    return write_palette_variant_package(session.composite(), output_dir, name=name, variants=variants)
+
+
 def editor_callable_actions() -> list[str]:
     return ["sprite.edit", "sprite.batch_edit", "palette.extract", "palette.swap", "palette.hue_shift", "palette.variants", "autotile.generate"]
+
+
+def default_recent_projects_state_path() -> Path:
+    return Path.home() / ".spritecut" / "recent_projects.json"
+
+
+def load_recent_projects(state_file: Path | None = None, *, limit: int = 8) -> list[Path]:
+    state_path = state_file or default_recent_projects_state_path()
+    if not state_path.exists():
+        return []
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    raw_paths = data.get("projects", []) if isinstance(data, dict) else []
+    if not isinstance(raw_paths, list):
+        return []
+    projects: list[Path] = []
+    seen: set[str] = set()
+    for raw_path in raw_paths:
+        path = Path(str(raw_path))
+        key = str(path.resolve()).lower() if path.exists() else str(path).lower()
+        if key in seen or not path.exists():
+            continue
+        seen.add(key)
+        projects.append(path)
+        if len(projects) >= limit:
+            break
+    return projects
+
+
+def remember_recent_project(state_file: Path | None, project_path: Path, *, limit: int = 8) -> list[Path]:
+    state_path = state_file or default_recent_projects_state_path()
+    project = project_path.resolve()
+    existing = [path for path in load_recent_projects(state_path, limit=limit) if path.resolve() != project]
+    projects = [project, *existing][:limit]
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps({"projects": [str(path) for path in projects]}, indent=2), encoding="utf-8")
+    return projects
+
+
+def create_ui_sample_pack(output_root: Path) -> Path:
+    output_root.mkdir(parents=True, exist_ok=True)
+    expected_path = create_golden_pack(output_root)
+    alias_path = output_root / "expected.json"
+    if expected_path != alias_path:
+        alias_path.write_text(expected_path.read_text(encoding="utf-8"), encoding="utf-8")
+    return output_root
 
 
 def project_animation_clip_names(project: dict[str, object]) -> list[str]:
@@ -778,6 +882,7 @@ class LeftInputPanel(SpriteToolPanel):
         app._add_button("Add Folder", app.choose_folder, "add_folder", width=-1)
         app._add_button("Add File", app.choose_file, "add_file", width=-1)
         app._add_button("Refresh", app.refresh_files, "refresh_files", width=-1)
+        app._add_button("Sample Pack", app.create_sample_pack_dialog, "create_sample_pack", width=-1)
         dpg.add_spacer(height=8)
         dpg.add_text("Sheets")
         with dpg.child_window(tag="file_list_panel", width=-1, height=470, border=True):
@@ -891,6 +996,9 @@ class ReviewSettingsPanel(SpriteToolPanel):
             app._add_button("Load Project", app.load_project_dialog, "load_project")
             app._add_button("Save Project", app.save_project_dialog, "save_project")
         with dpg.group(horizontal=True):
+            app._add_combo("##recent_project", app.recent_project, [str(path) for path in app.recent_projects], "recent_projects", tag="recent_project_combo", width=190)
+            app._add_button("Open Recent", app.open_recent_project, "recent_projects")
+        with dpg.group(horizontal=True):
             app._add_button("Undo", app.undo_project_edit, "undo")
             app._add_button("Redo", app.redo_project_edit, "redo")
         app._add_button("Apply Outputs", app.apply_project_outputs, "apply_outputs", width=-1)
@@ -982,10 +1090,24 @@ class EditorSettingsPanel(SpriteToolPanel):
         with dpg.group(horizontal=True):
             app._add_button("Load Sprite", app.load_editor_sprite_dialog, "editor_load_sprite")
             app._add_button("Save Package", app.save_editor_package, "editor_save_package")
+        with dpg.group(horizontal=True):
+            app._add_button("Undo", app.undo_editor_edit, "editor_undo")
+            app._add_button("Redo", app.redo_editor_edit, "editor_redo")
         with dpg.child_window(tag="editor_preview_panel", width=-1, height=145, border=True):
             dpg.add_text("Load a sprite to edit.", wrap=260)
         dpg.add_text("Palette: none", tag="editor_palette_label", wrap=260)
         attach_tooltip("editor_palette_label", "editor_palette_summary")
+        dpg.add_text("Transform")
+        app._add_input_text("##editor_crop_rect", app.editor_crop_rect, "editor_crop_rect", "editor_crop_rect", width=-1)
+        with dpg.group(horizontal=True):
+            app._add_button("Crop", app.apply_editor_crop, "editor_crop")
+            app._add_input_text("##editor_resize_size", app.editor_resize_size, "editor_resize_size", "editor_resize_size", width=110)
+            app._add_button("Resize", app.apply_editor_resize, "editor_resize")
+        with dpg.group(horizontal=True):
+            app._add_combo("##editor_flip_axis", app.editor_flip_axis, ["horizontal", "vertical"], "editor_flip_axis", width=120)
+            app._add_button("Flip", app.apply_editor_flip, "editor_flip")
+            app._add_button("Rotate CW", lambda *_args: app.apply_editor_rotate(clockwise=True), "editor_rotate")
+            app._add_button("Rotate CCW", lambda *_args: app.apply_editor_rotate(clockwise=False), "editor_rotate")
         dpg.add_text("Palette Swap")
         with dpg.group(horizontal=True):
             app._add_input_text("##editor_source_color", app.editor_source_color, "editor_source_color", "editor_source_color", width=120)
@@ -998,6 +1120,7 @@ class EditorSettingsPanel(SpriteToolPanel):
         with dpg.group(horizontal=True):
             app._add_button("Hue Shift", app.apply_editor_hue_shift, "editor_hue_shift")
             app._add_button("Wheel", app.preview_editor_color_wheel, "editor_color_wheel")
+        app._add_button("Palette Variants", app.generate_editor_palette_variants, "editor_palette_variants", width=-1)
         dpg.add_text("Auto-Tile")
         with dpg.group(horizontal=True):
             app._add_input_text("##editor_autotile_name", app.editor_autotile_name, "editor_autotile_name", "editor_autotile_name", width=135)
@@ -1035,6 +1158,18 @@ class SpriteEditorController(UiController):
 
     def apply_hue_shift(self, *args: object) -> None:
         self.app._apply_editor_hue_shift_impl(*args)
+
+    def apply_crop(self, *args: object) -> None:
+        self.app._apply_editor_crop_impl(*args)
+
+    def apply_resize(self, *args: object) -> None:
+        self.app._apply_editor_resize_impl(*args)
+
+    def apply_flip(self, *args: object) -> None:
+        self.app._apply_editor_flip_impl(*args)
+
+    def apply_rotate(self, *, clockwise: bool = True) -> None:
+        self.app._apply_editor_rotate_impl(clockwise=clockwise)
 
 
 class SpriteSheetToolUi:
@@ -1081,6 +1216,9 @@ class SpriteSheetToolUi:
         self.latest_project_path: Path | None = None
         self.current_project: dict[str, object] | None = None
         self.current_project_path: Path | None = None
+        self.recent_projects_state_path = default_recent_projects_state_path()
+        self.recent_projects = load_recent_projects(self.recent_projects_state_path)
+        self.recent_project = DpgValue(str(self.recent_projects[0]) if self.recent_projects else "")
         self.project_sprite_rows_cache: list[dict[str, object]] = []
         self.review_canvas_scale: float = 1.0
         self.review_canvas_drag_start: tuple[int, int] | None = None
@@ -1110,6 +1248,9 @@ class SpriteSheetToolUi:
         self.studio_taxonomy_pattern = DpgValue("{category}_{source_sheet}_{index:03d}")
         self.studio_asset_rows_cache: list[dict[str, object]] = []
         self.editor_session: SpriteEditSession | None = None
+        self.editor_crop_rect = DpgValue("0,0,16,16")
+        self.editor_resize_size = DpgValue("16x16")
+        self.editor_flip_axis = DpgValue("horizontal")
         self.editor_source_color = DpgValue("#ff0000")
         self.editor_target_color = DpgValue("#00ffff")
         self.editor_hue_degrees = DpgValue("0")
@@ -1233,6 +1374,18 @@ class SpriteSheetToolUi:
 
     def apply_editor_hue_shift(self, *_args: object) -> None:
         self.editor_controller.apply_hue_shift(*_args)
+
+    def apply_editor_crop(self, *_args: object) -> None:
+        self.editor_controller.apply_crop(*_args)
+
+    def apply_editor_resize(self, *_args: object) -> None:
+        self.editor_controller.apply_resize(*_args)
+
+    def apply_editor_flip(self, *_args: object) -> None:
+        self.editor_controller.apply_flip(*_args)
+
+    def apply_editor_rotate(self, *, clockwise: bool = True) -> None:
+        self.editor_controller.apply_rotate(clockwise=clockwise)
 
     def _build_left_panel(self) -> None:
         LeftInputPanel(self).build()
@@ -1377,6 +1530,20 @@ class SpriteSheetToolUi:
         if path is not None:
             self.input_path.set(str(path))
             self.refresh_files()
+
+    def create_sample_pack_dialog(self, *_args: object) -> None:
+        self._dialog_actions["directory_action_dialog"] = self._create_sample_pack_to
+        if dpg is not None:
+            dpg.show_item("directory_action_dialog")
+
+    def _create_sample_pack_to(self, path: Path) -> None:
+        try:
+            output = create_ui_sample_pack(path / "spritecut_sample_pack")
+            self.input_path.set(str(output))
+            self.refresh_files()
+            self.append_log(f"Created sample pack: {output}")
+        except Exception as exc:
+            self._show_error("Sample Pack", str(exc))
 
     def refresh_files(self, *_args: object) -> None:
         path_text = str(self.input_path.get()).strip()
@@ -1543,11 +1710,30 @@ class SpriteSheetToolUi:
         try:
             self.current_project = load_project(path)
             self.current_project_path = path
+            self._remember_recent_project(path)
             self.append_log(f"Loaded project: {path}")
             self.refresh_project_rows()
             self.refresh_project_animation_clips()
         except Exception as exc:
             self._show_error("Load Project", str(exc))
+
+    def _remember_recent_project(self, path: Path) -> None:
+        self.recent_projects = remember_recent_project(self.recent_projects_state_path, path)
+        self.recent_project.set(str(self.recent_projects[0]) if self.recent_projects else "")
+        if dpg is not None and self._built and dpg.does_item_exist("recent_project_combo"):
+            dpg.configure_item("recent_project_combo", items=[str(project) for project in self.recent_projects])
+
+    def open_recent_project(self, *_args: object) -> None:
+        selected = str(self.recent_project.get()).strip()
+        if not selected:
+            self._show_info("Open Recent", "No recent project is selected.")
+            return
+        path = Path(selected)
+        if not path.exists():
+            self.recent_projects = load_recent_projects(self.recent_projects_state_path)
+            self._show_error("Open Recent", f"Recent project no longer exists:\n{path}")
+            return
+        self.load_project_file(path)
 
     def save_project_dialog(self, *_args: object) -> None:
         if self.current_project is None:
@@ -1670,6 +1856,80 @@ class SpriteSheetToolUi:
         except Exception as exc:
             self._show_error("Hue Shift", str(exc))
 
+    def undo_editor_edit(self, *_args: object) -> None:
+        if self.editor_session is None:
+            self._show_info("Undo", "Load a sprite before undoing editor operations.")
+            return
+        try:
+            self.editor_session.undo()
+            self.append_log("Undo editor operation")
+            self.refresh_editor_preview()
+        except Exception as exc:
+            self._show_error("Undo", str(exc))
+
+    def redo_editor_edit(self, *_args: object) -> None:
+        if self.editor_session is None:
+            self._show_info("Redo", "Load a sprite before redoing editor operations.")
+            return
+        try:
+            self.editor_session.redo()
+            self.append_log("Redo editor operation")
+            self.refresh_editor_preview()
+        except Exception as exc:
+            self._show_error("Redo", str(exc))
+
+    def _apply_editor_crop_impl(self, *_args: object) -> None:
+        if self.editor_session is None:
+            self._show_info("Crop", "Load a sprite before cropping.")
+            return
+        try:
+            rect = editor_parse_rect_text(str(self.editor_crop_rect.get()))
+            self.editor_session.crop(rect)
+            self.append_log(f"Crop: {rect[0]},{rect[1]},{rect[2]},{rect[3]}")
+            self.refresh_editor_preview()
+        except Exception as exc:
+            self._show_error("Crop", str(exc))
+
+    def _apply_editor_resize_impl(self, *_args: object) -> None:
+        if self.editor_session is None:
+            self._show_info("Resize", "Load a sprite before resizing.")
+            return
+        try:
+            size = editor_parse_size_text(str(self.editor_resize_size.get()))
+            self.editor_session.resize(size)
+            self.append_log(f"Resize: {size[0]}x{size[1]}")
+            self.refresh_editor_preview()
+        except Exception as exc:
+            self._show_error("Resize", str(exc))
+
+    def _apply_editor_flip_impl(self, *_args: object) -> None:
+        if self.editor_session is None:
+            self._show_info("Flip", "Load a sprite before flipping.")
+            return
+        try:
+            axis = str(self.editor_flip_axis.get()).strip().lower()
+            if axis == "horizontal":
+                self.editor_session.flip_horizontal()
+            elif axis == "vertical":
+                self.editor_session.flip_vertical()
+            else:
+                raise ValueError(f"Unsupported flip axis: {axis}")
+            self.append_log(f"Flip: {axis}")
+            self.refresh_editor_preview()
+        except Exception as exc:
+            self._show_error("Flip", str(exc))
+
+    def _apply_editor_rotate_impl(self, *, clockwise: bool = True) -> None:
+        if self.editor_session is None:
+            self._show_info("Rotate", "Load a sprite before rotating.")
+            return
+        try:
+            self.editor_session.rotate_90(clockwise=clockwise)
+            self.append_log("Rotate: 90 degrees " + ("clockwise" if clockwise else "counter-clockwise"))
+            self.refresh_editor_preview()
+        except Exception as exc:
+            self._show_error("Rotate", str(exc))
+
     def preview_editor_color_wheel(self, *_args: object) -> None:
         try:
             base = str(self.editor_target_color.get()).strip() or "#ff0000"
@@ -1677,6 +1937,29 @@ class SpriteSheetToolUi:
             self.append_log(f"Color wheel: {preview}")
         except Exception as exc:
             self._show_error("Color Wheel", str(exc))
+
+    def generate_editor_palette_variants(self, *_args: object) -> None:
+        if self.editor_session is None:
+            self._show_info("Palette Variants", "Load a sprite before generating palette variants.")
+            return
+        self._dialog_actions["directory_action_dialog"] = self._write_palette_variants_to
+        if dpg is not None:
+            dpg.show_item("directory_action_dialog")
+
+    def _write_palette_variants_to(self, path: Path) -> None:
+        if self.editor_session is None:
+            return
+        try:
+            result = editor_variant_package(
+                self.editor_session,
+                path,
+                name=self.editor_session.name,
+                base_color=str(self.editor_source_color.get()).strip() or "#ff0000",
+                harmony=str(self.editor_harmony.get()),
+            )
+            self.append_log(f"Generated palette variants: {result['contact_sheet']}")
+        except Exception as exc:
+            self._show_error("Palette Variants", str(exc))
 
     def generate_editor_autotile(self, *_args: object) -> None:
         if self.editor_session is None:
@@ -2267,19 +2550,19 @@ class SpriteSheetToolUi:
         self._set_text("log_text", "")
 
     def _set_button_enabled(self, tag: str, enabled: bool) -> None:
-        if dpg is not None and dpg.does_item_exist(tag):
+        if dpg is not None and self._built and dpg.does_item_exist(tag):
             dpg.configure_item(tag, enabled=enabled)
 
     def _set_text(self, tag: str, text: str) -> None:
-        if dpg is not None and dpg.does_item_exist(tag):
+        if dpg is not None and self._built and dpg.does_item_exist(tag):
             dpg.set_value(tag, text)
 
     def _clear_item_children(self, tag: str) -> None:
-        if dpg is not None and dpg.does_item_exist(tag):
+        if dpg is not None and self._built and dpg.does_item_exist(tag):
             dpg.delete_item(tag, children_only=True)
 
     def _show_text_panel(self, panel_tag: str, text: str) -> None:
-        if dpg is None or not dpg.does_item_exist(panel_tag):
+        if dpg is None or not self._built or not dpg.does_item_exist(panel_tag):
             return
         dpg.delete_item(panel_tag, children_only=True)
         dpg.add_text(text, parent=panel_tag, wrap=520)
@@ -2297,7 +2580,7 @@ class SpriteSheetToolUi:
         return tag
 
     def _show_image_in_panel(self, panel_tag: str, key: str, image: Image.Image, *, fallback_text: str = "") -> None:
-        if dpg is None or not dpg.does_item_exist(panel_tag):
+        if dpg is None or not self._built or not dpg.does_item_exist(panel_tag):
             return
         dpg.delete_item(panel_tag, children_only=True)
         texture = self._make_texture(key, image)

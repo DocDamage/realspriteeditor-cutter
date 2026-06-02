@@ -36,10 +36,15 @@ from tools.sprite_sheet_tool_ui import (
     editor_callable_actions,
     editor_color_wheel_preview,
     editor_palette_summary,
+    editor_parse_rect_text,
+    editor_parse_size_text,
+    editor_variant_package,
     format_project_sprite_label,
     load_preset_file,
     output_targets_from_cli_line,
     apply_preview_accessibility_mode,
+    create_ui_sample_pack,
+    load_recent_projects,
     parse_bbox_fields,
     parse_flags_text,
     parse_pivot_fields,
@@ -50,6 +55,7 @@ from tools.sprite_sheet_tool_ui import (
     scale_bbox_for_canvas,
     translate_bbox_by_canvas_delta,
     render_detection_preview,
+    remember_recent_project,
     save_preset_file,
     settings_from_preset_dict,
     settings_from_builtin_preset,
@@ -416,6 +422,58 @@ class SpriteSheetToolUiTests(unittest.TestCase):
         self.assertIn("palette.swap", actions)
         self.assertIn("autotile.generate", actions)
 
+    def test_editor_transform_text_parsers_accept_common_formats(self) -> None:
+        self.assertEqual(editor_parse_rect_text("1, 2, 30, 40"), (1, 2, 30, 40))
+        self.assertEqual(editor_parse_rect_text("1 2 30 40"), (1, 2, 30, 40))
+        self.assertEqual(editor_parse_size_text("16x24"), (16, 24))
+        self.assertEqual(editor_parse_size_text("16, 24"), (16, 24))
+
+        with self.assertRaises(ValueError):
+            editor_parse_rect_text("1, 2, 3")
+        with self.assertRaises(ValueError):
+            editor_parse_size_text("0x24")
+
+    def test_editor_transform_methods_apply_existing_backend_operations(self) -> None:
+        image = Image.new("RGBA", (4, 3), (0, 0, 0, 0))
+        image.putpixel((0, 0), (255, 0, 0, 255))
+        app = SpriteSheetToolUi(build=False)
+        app.editor_session = ui_module.SpriteEditSession.from_image(image, name="sample")
+
+        app.editor_crop_rect.set("0,0,2,2")
+        app.apply_editor_crop()
+        self.assertEqual(app.editor_session.size, (2, 2))
+
+        app.undo_editor_edit()
+        self.assertEqual(app.editor_session.size, (4, 3))
+        app.redo_editor_edit()
+        self.assertEqual(app.editor_session.size, (2, 2))
+
+        app.editor_resize_size.set("4x4")
+        app.apply_editor_resize()
+        self.assertEqual(app.editor_session.size, (4, 4))
+
+        app.editor_flip_axis.set("horizontal")
+        app.apply_editor_flip()
+        app.apply_editor_rotate(clockwise=False)
+        self.assertIn("Rotate", app.log_lines[-1])
+
+    def test_editor_variant_package_writes_colorway_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Image.new("RGBA", (4, 4), (255, 0, 0, 255))
+            session = ui_module.SpriteEditSession.from_image(image, name="crate")
+
+            package = editor_variant_package(
+                session,
+                Path(tmp),
+                name="crate",
+                base_color="#ff0000",
+                harmony="complementary",
+            )
+
+            self.assertEqual(len(package["variants"]), 2)
+            self.assertTrue(Path(package["manifest"]).exists())
+            self.assertTrue(Path(package["contact_sheet"]).exists())
+
     def test_settings_presets_round_trip_without_input_path(self) -> None:
         settings = CutterUiSettings(
             input_path=Path("G:/assets/sheets"),
@@ -474,6 +532,31 @@ class SpriteSheetToolUiTests(unittest.TestCase):
             self.assertEqual(loaded.animation_fps, 14)
             self.assertEqual(loaded.engine_exports, ["godot"])
             self.assertEqual(loaded.alpha_threshold, 18)
+
+    def test_recent_project_helpers_dedupe_and_drop_missing_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_file = root / "recent_projects.json"
+            first = root / "first.spritecut.json"
+            second = root / "second.spritecut.json"
+            first.write_text("{}", encoding="utf-8")
+            second.write_text("{}", encoding="utf-8")
+
+            remember_recent_project(state_file, first, limit=3)
+            remember_recent_project(state_file, second, limit=3)
+            remember_recent_project(state_file, first, limit=3)
+
+            self.assertEqual(load_recent_projects(state_file), [first, second])
+            second.unlink()
+            self.assertEqual(load_recent_projects(state_file), [first])
+
+    def test_create_ui_sample_pack_writes_golden_fixture_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = create_ui_sample_pack(Path(tmp))
+
+            self.assertTrue((output / "transparent_animation_rows" / "hero.png").exists())
+            self.assertTrue((output / "packed_props_dark_bg" / "props.png").exists())
+            self.assertTrue((output / "expected.json").exists())
 
     def test_render_detection_preview_draws_on_image(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

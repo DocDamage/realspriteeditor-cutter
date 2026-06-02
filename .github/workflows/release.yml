@@ -1,0 +1,40 @@
+name: Release Bundle
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    name: Build downloadable bundle
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Verify tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Build bundle
+        run: .\tools\package_sprite_tool.ps1 -OutDir dist\sprite-sheet-processor
+        shell: pwsh
+
+      - name: Compress bundle
+        run: Compress-Archive -Path dist\sprite-sheet-processor -DestinationPath dist\sprite-sheet-processor.zip -Force
+        shell: pwsh
+
+      - name: Upload sprite-sheet-processor artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sprite-sheet-processor
+          path: dist/sprite-sheet-processor.zip

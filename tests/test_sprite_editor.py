@@ -51,6 +51,26 @@ class SpriteEditorTests(unittest.TestCase):
         session.redo()
         self.assertEqual(session.composite().getpixel((4, 0)), (0, 120, 0, 255))
 
+    def test_edit_session_layer_management_renames_duplicates_reorders_visibility_and_opacity(self) -> None:
+        image = Image.new("RGBA", (4, 4), (255, 0, 0, 255))
+        session = SpriteEditSession.from_image(image, name="layers")
+
+        session.add_layer("detail")
+        session.rename_layer(1, "details")
+        session.duplicate_layer(1, "details_copy")
+        session.reorder_layer(2, 0)
+        session.set_layer_visibility(1, False)
+        session.set_layer_opacity(0, 0.5)
+        session.select_layer(0)
+
+        self.assertEqual([layer.name for layer in session.layers], ["details_copy", "base", "details"])
+        self.assertEqual(session.active_layer, 0)
+        self.assertFalse(session.layers[1].visible)
+        self.assertEqual(session.layers[0].opacity, 0.5)
+
+        session.delete_layer(2)
+        self.assertEqual(len(session.layers), 2)
+
     def test_edit_session_transforms_crop_resize_flip_rotate_and_save(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

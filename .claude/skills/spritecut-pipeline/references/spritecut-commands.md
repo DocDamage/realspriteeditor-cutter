@@ -245,6 +245,8 @@ python ..\..\..\..\tools\sprite_ide_api.py --request autotile_request.json
 
 ## Editor Operations
 
+Use the Editor tab's embedded workspace or `Fullscreen Editor` mode for mouse tools, keyboard shortcuts, layers, palette controls, animation timeline preview, contextual help, and project-attached saves.
+
 Supported `sprite.edit` and `sprite.batch_edit` operations:
 
 - `add_layer`: `name`, `visible`, `opacity`

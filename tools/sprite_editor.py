@@ -183,6 +183,58 @@ class SpriteEditSession:
         self.layers.append(SpriteLayer(name, layer_image, visible, max(0.0, min(1.0, float(opacity)))))
         self.active_layer = len(self.layers) - 1
 
+    def _require_layer_index(self, index: int) -> int:
+        index = int(index)
+        if index < 0 or index >= len(self.layers):
+            raise ValueError(f"Layer index out of range: {index}")
+        return index
+
+    def select_layer(self, index: int) -> None:
+        self.active_layer = self._require_layer_index(index)
+
+    def rename_layer(self, index: int, name: str) -> None:
+        index = self._require_layer_index(index)
+        clean_name = str(name).strip()
+        if not clean_name:
+            raise ValueError("Layer name cannot be empty.")
+        self._record("rename_layer", index=index, name=clean_name)
+        self.layers[index].name = clean_name
+
+    def duplicate_layer(self, index: int, name: str | None = None) -> None:
+        index = self._require_layer_index(index)
+        source = self.layers[index]
+        next_name = str(name).strip() if name else f"{source.name}_copy"
+        self._record("duplicate_layer", index=index, name=next_name)
+        self.layers.insert(index + 1, SpriteLayer(next_name, source.image.copy(), source.visible, source.opacity))
+        self.active_layer = index + 1
+
+    def delete_layer(self, index: int) -> None:
+        index = self._require_layer_index(index)
+        if len(self.layers) <= 1:
+            raise ValueError("Cannot delete the only layer.")
+        self._record("delete_layer", index=index)
+        del self.layers[index]
+        self.active_layer = min(self.active_layer, len(self.layers) - 1)
+
+    def reorder_layer(self, from_index: int, to_index: int) -> None:
+        from_index = self._require_layer_index(from_index)
+        to_index = max(0, min(len(self.layers) - 1, int(to_index)))
+        self._record("reorder_layer", from_index=from_index, to_index=to_index)
+        layer = self.layers.pop(from_index)
+        self.layers.insert(to_index, layer)
+        self.active_layer = to_index
+
+    def set_layer_visibility(self, index: int, visible: bool) -> None:
+        index = self._require_layer_index(index)
+        self._record("set_layer_visibility", index=index, visible=bool(visible))
+        self.layers[index].visible = bool(visible)
+
+    def set_layer_opacity(self, index: int, opacity: float) -> None:
+        index = self._require_layer_index(index)
+        next_opacity = max(0.0, min(1.0, float(opacity)))
+        self._record("set_layer_opacity", index=index, opacity=next_opacity)
+        self.layers[index].opacity = next_opacity
+
     def composite(self) -> Image.Image:
         if not self.layers:
             return Image.new("RGBA", (1, 1), (0, 0, 0, 0))

@@ -343,6 +343,25 @@ class SpriteSheetToolUiTests(unittest.TestCase):
             "studio_taxonomy_pattern",
             "editor_load_sprite",
             "editor_save_package",
+            "editor_fullscreen",
+            "editor_canvas",
+            "editor_tool_scope",
+            "editor_tool_pencil",
+            "editor_tool_eraser",
+            "editor_tool_eyedropper",
+            "editor_tool_fill",
+            "editor_tool_line",
+            "editor_tool_rect_fill",
+            "editor_tool_rect_outline",
+            "editor_tool_select_move",
+            "editor_tool_crop",
+            "editor_tool_pan",
+            "editor_tool_zoom",
+            "editor_layers_panel",
+            "editor_palette_panel",
+            "editor_help_panel",
+            "editor_timeline_panel",
+            "editor_save_project",
             "editor_palette_summary",
             "editor_source_color",
             "editor_target_color",
@@ -460,6 +479,158 @@ class SpriteSheetToolUiTests(unittest.TestCase):
         app.apply_editor_flip()
         app.apply_editor_rotate(clockwise=False)
         self.assertIn("Rotate", app.log_lines[-1])
+
+    def test_editor_workspace_state_methods_update_fullscreen_tool_and_scope(self) -> None:
+        app = SpriteSheetToolUi(build=False)
+
+        app.set_editor_fullscreen(True)
+        app.set_editor_tool("fill")
+        app.set_editor_tool_scope("all_frames")
+
+        self.assertTrue(app.editor_workspace.fullscreen)
+        self.assertEqual(str(app.editor_fullscreen.get()), "True")
+        self.assertEqual(str(app.editor_active_tool.get()), "fill")
+        self.assertEqual(str(app.editor_tool_scope.get()), "all_frames")
+
+    def test_editor_status_uses_canvas_workspace_context(self) -> None:
+        app = SpriteSheetToolUi(build=False)
+
+        app._refresh_editor_status((2, 3), "#00ff00")
+
+        self.assertIn("x=2 y=3", str(app.editor_status.get()))
+        self.assertIn("#00ff00", str(app.editor_status.get()))
+        self.assertIn("zoom=", str(app.editor_status.get()))
+
+    def test_editor_mouse_gesture_applies_tool_to_loaded_session(self) -> None:
+        app = SpriteSheetToolUi(build=False)
+        app.editor_session = ui_module.SpriteEditSession.from_image(Image.new("RGBA", (4, 4), (0, 0, 0, 0)), name="sample")
+        app.editor_workspace = app.editor_workspace.with_tool(ui_module.EditorTool.PENCIL)
+        app.editor_workspace = ui_module.replace(app.editor_workspace, foreground_color="#ff0000")
+
+        app._apply_editor_mouse_gesture(ui_module.MouseGesture("click", (1, 1)))
+
+        self.assertEqual(app.editor_session.composite().getpixel((1, 1)), (255, 0, 0, 255))
+
+    def test_editor_fullscreen_visibility_plan_hides_non_editor_panels(self) -> None:
+        app = SpriteSheetToolUi(build=False)
+
+        embedded = app.editor_visibility_plan()
+        app.set_editor_fullscreen(True)
+        fullscreen = app.editor_visibility_plan()
+
+        self.assertTrue(embedded["main_panels"])
+        self.assertTrue(embedded["editor_panel"])
+        self.assertFalse(fullscreen["main_panels"])
+        self.assertTrue(fullscreen["editor_panel"])
+        self.assertTrue(fullscreen["timeline_panel"])
+
+    def test_editor_shortcut_handler_updates_tool_and_returns_handled_state(self) -> None:
+        app = SpriteSheetToolUi(build=False)
+
+        handled = app.handle_editor_shortcut("G")
+
+        self.assertTrue(handled)
+        self.assertEqual(str(app.editor_active_tool.get()), "fill")
+        self.assertFalse(app.handle_editor_shortcut("unknown"))
+
+    def test_editor_layer_helpers_show_rows_and_duplicate_delete_layers(self) -> None:
+        app = SpriteSheetToolUi(build=False)
+        app.editor_session = ui_module.SpriteEditSession.from_image(Image.new("RGBA", (4, 4), (0, 0, 0, 0)), name="layers")
+
+        app.duplicate_editor_layer()
+        rows = app.editor_layer_rows()
+
+        self.assertEqual(len(rows), 2)
+        self.assertIn("base_copy", rows[1])
+
+        app.delete_editor_layer()
+        self.assertEqual(len(app.editor_layer_rows()), 1)
+
+    def test_editor_palette_rows_show_loaded_sprite_colors(self) -> None:
+        app = SpriteSheetToolUi(build=False)
+        image = Image.new("RGBA", (2, 1), (255, 0, 0, 255))
+        image.putpixel((1, 0), (0, 255, 0, 255))
+        app.editor_session = ui_module.SpriteEditSession.from_image(image, name="palette")
+
+        rows = app.editor_palette_rows()
+
+        self.assertTrue(any("#ff0000" in row for row in rows))
+        self.assertTrue(any("#00ff00" in row for row in rows))
+
+    def test_editor_loads_animation_clip_from_current_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "idle_001.png"
+            second = root / "idle_002.png"
+            Image.new("RGBA", (4, 4), (255, 0, 0, 255)).save(first)
+            Image.new("RGBA", (4, 4), (0, 255, 0, 255)).save(second)
+            app = SpriteSheetToolUi(build=False)
+            app.current_project_path = root / "project.spritecut.json"
+            app.current_project = {
+                "animation_clips": [
+                    {
+                        "name": "idle",
+                        "frame_rate": 12,
+                        "frames": [
+                            {"sprite": "one", "source_file": "idle_001.png", "duration": 0.1},
+                            {"sprite": "two", "source_file": "idle_002.png", "duration": 0.1},
+                        ],
+                    }
+                ],
+                "sprites": [],
+            }
+
+            app.load_editor_animation_clip_from_project("idle")
+
+            self.assertIsNotNone(app.editor_animation_session)
+            self.assertEqual(len(app.editor_animation_session.frames), 2)
+            self.assertEqual(app.editor_session.name, "one")
+
+    def test_editor_animation_playback_advances_selected_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "one.png"
+            second = root / "two.png"
+            Image.new("RGBA", (4, 4), (255, 0, 0, 255)).save(first)
+            Image.new("RGBA", (4, 4), (0, 255, 0, 255)).save(second)
+            app = SpriteSheetToolUi(build=False)
+            app.editor_animation_session = ui_module.AnimationEditSession.from_frame_refs(
+                "idle",
+                [ui_module.AnimationFrameRef("one", first), ui_module.AnimationFrameRef("two", second)],
+            )
+            app.editor_session = app.editor_animation_session.frames[0]
+
+            app.toggle_editor_animation_playback()
+            app.tick_editor_animation(now=1.0)
+
+            self.assertEqual(app.editor_animation_session.active_frame, 1)
+            self.assertEqual(app.editor_workspace.active_frame_index, 1)
+
+    def test_save_editor_to_project_writes_applied_sprite_and_updates_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_path = root / "project.spritecut.json"
+            app = SpriteSheetToolUi(build=False)
+            app.current_project_path = project_path
+            app.current_project = {"sprites": [{"id": "sprite_001", "review_status": "needs_review", "review_flags": []}]}
+            app.editor_source_sprite_id = "sprite_001"
+            app.editor_session = ui_module.SpriteEditSession.from_image(Image.new("RGBA", (4, 4), (255, 0, 0, 255)), name="sprite_001")
+
+            app.save_editor_to_project()
+
+            self.assertTrue((root / "applied_project" / "sprites" / "edited" / "sprite_001.png").exists())
+            self.assertEqual(app.current_project["sprites"][0]["review_status"], "approved")
+            self.assertTrue(project_path.exists())
+
+    def test_editor_help_panel_text_mentions_tools_shortcuts_and_mouse(self) -> None:
+        app = SpriteSheetToolUi(build=False)
+
+        text = app.editor_help_reference_text()
+
+        self.assertIn("Mouse", text)
+        self.assertIn("Ctrl+Z", text)
+        self.assertIn("Pencil", text)
+        self.assertIn("Animation", text)
 
     def test_editor_variant_package_writes_colorway_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

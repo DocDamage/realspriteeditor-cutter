@@ -55,6 +55,7 @@ The studio pass writes:
 
 The `Editor` tab is for single-sprite polish after cutting or review:
 
+- Use `Fullscreen Editor` when polishing sprites or character clips. The left rail chooses tools, the center canvas supports zoom/pan/grid editing, the right panels manage layers/palette/help, and the bottom timeline appears for loaded animation clips.
 - Load one PNG/JPG/WebP sprite into a layered edit session.
 - Inspect the dominant visible palette.
 - Swap exact colors with transparency preserved.

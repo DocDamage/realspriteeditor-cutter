@@ -8,6 +8,8 @@ from pathlib import Path
 from PIL import Image
 
 from tools.sprite_project import (
+    attach_animation_edit_output,
+    attach_sprite_edit_output,
     approve_sprite,
     load_project,
     merge_sprites,
@@ -96,6 +98,22 @@ def sample_render_project(root: Path) -> dict[str, object]:
 
 
 class SpriteProjectTests(unittest.TestCase):
+    def test_attach_sprite_edit_output_sets_applied_file_and_review_status(self) -> None:
+        project = {"sprites": [{"id": "sprite_001", "review_status": "needs_review", "review_flags": ["edited"]}]}
+
+        updated = attach_sprite_edit_output(project, "sprite_001", "applied/sprite_001.png")
+
+        self.assertEqual(updated["sprites"][0]["applied_output_file"], "applied/sprite_001.png")
+        self.assertEqual(updated["sprites"][0]["review_status"], "approved")
+        self.assertEqual(updated["sprites"][0]["review_flags"], [])
+
+    def test_attach_animation_edit_output_records_clip_manifest(self) -> None:
+        project = {"animation_clips": [{"name": "idle"}]}
+
+        updated = attach_animation_edit_output(project, "idle", "applied/animations/idle/animation_edit_manifest.json")
+
+        self.assertEqual(updated["animation_clips"][0]["applied_manifest"], "applied/animations/idle/animation_edit_manifest.json")
+
     def test_save_and_load_project_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "project.spritecut.json"

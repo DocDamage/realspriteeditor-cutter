@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
@@ -24,16 +24,52 @@ try:
     from tools.autotile_tools import write_autotile_package
     from tools.cut_tileset_sprites import BUILT_IN_PRESETS, DetectionSettings, detect_background, extract_detections, grouped_components, is_inside_spritecut_output
     from tools.golden_sprite_fixtures import create_golden_pack
+    from tools.sprite_animation_editor import AnimationEditSession, AnimationFrameRef, playback_next_frame, write_applied_animation
     from tools.sprite_editor import SpriteEditSession, color_wheel_palette, extract_palette, write_edit_package, write_palette_variant_package
-    from tools.sprite_project import approve_sprite, load_project, merge_sprites, redo_last_edit, reject_sprite, render_project_outputs, save_project, split_sprite, undo_last_edit, update_sprite
+    from tools.sprite_editor_workspace import (
+        EDITOR_SHORTCUTS,
+        EDITOR_TOOLS,
+        CanvasView,
+        EditorTool,
+        EditorWorkspaceState,
+        MouseGesture,
+        ToolScope,
+        apply_mouse_tool,
+        apply_shortcut_action,
+        canvas_status_text,
+        checkerboard_image,
+        palette_swatch_rows,
+        shortcut_action_for_key,
+        state_help_text,
+        tool_help_text,
+    )
+    from tools.sprite_project import approve_sprite, attach_animation_edit_output, attach_sprite_edit_output, load_project, merge_sprites, redo_last_edit, reject_sprite, render_project_outputs, save_project, split_sprite, undo_last_edit, update_sprite
     from tools.sprite_studio import apply_taxonomy_rules, asset_browser_index, batch_health_score, build_engine_import_plans, build_review_dashboard, diff_projects, generate_collision_profiles, review_and_apply_project, search_assets, train_preset_from_project
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tools.autotile_tools import write_autotile_package
     from tools.cut_tileset_sprites import BUILT_IN_PRESETS, DetectionSettings, detect_background, extract_detections, grouped_components, is_inside_spritecut_output
     from tools.golden_sprite_fixtures import create_golden_pack
+    from tools.sprite_animation_editor import AnimationEditSession, AnimationFrameRef, playback_next_frame, write_applied_animation
     from tools.sprite_editor import SpriteEditSession, color_wheel_palette, extract_palette, write_edit_package, write_palette_variant_package
-    from tools.sprite_project import approve_sprite, load_project, merge_sprites, redo_last_edit, reject_sprite, render_project_outputs, save_project, split_sprite, undo_last_edit, update_sprite
+    from tools.sprite_editor_workspace import (
+        EDITOR_SHORTCUTS,
+        EDITOR_TOOLS,
+        CanvasView,
+        EditorTool,
+        EditorWorkspaceState,
+        MouseGesture,
+        ToolScope,
+        apply_mouse_tool,
+        apply_shortcut_action,
+        canvas_status_text,
+        checkerboard_image,
+        palette_swatch_rows,
+        shortcut_action_for_key,
+        state_help_text,
+        tool_help_text,
+    )
+    from tools.sprite_project import approve_sprite, attach_animation_edit_output, attach_sprite_edit_output, load_project, merge_sprites, redo_last_edit, reject_sprite, render_project_outputs, save_project, split_sprite, undo_last_edit, update_sprite
     from tools.sprite_studio import apply_taxonomy_rules, asset_browser_index, batch_health_score, build_engine_import_plans, build_review_dashboard, diff_projects, generate_collision_profiles, review_and_apply_project, search_assets, train_preset_from_project
 
 
@@ -130,6 +166,31 @@ TOOLTIP_TEXT: dict[str, str] = {
     "studio_taxonomy_pattern": "Naming template used by Auto Name and Review + Apply, such as category, source sheet, and index tokens.",
     "editor_load_sprite": "Load one sprite PNG into the non-destructive editor session for palette, color, and autotile operations.",
     "editor_save_package": "Save the edited sprite plus an edit manifest and extracted palette JSON package.",
+    "editor_fullscreen": "Expand the Editor into a focused workspace inside the app window.",
+    "editor_save_project": "Save the current edited sprite or animation frames back into the loaded SpriteCut project outputs.",
+    "editor_canvas": "Edit pixels with the active tool. Mouse wheel zooms, space-drag pans, and the status bar shows cursor details.",
+    "editor_tool_scope": "Choose whether an edit affects the active layer, selected region, current frame, selected frames, or all frames.",
+    "editor_tool_pencil": "Draw pixel-perfect strokes with the foreground color. Shortcut: B.",
+    "editor_tool_eraser": "Erase pixels on the active layer to transparent. Shortcut: E.",
+    "editor_tool_eyedropper": "Pick a visible canvas color into the active color field. Shortcut: I.",
+    "editor_tool_fill": "Flood-fill connected pixels with the foreground color. Shortcut: G.",
+    "editor_tool_line": "Drag to draw a straight line. Shortcut: L.",
+    "editor_tool_rect_fill": "Drag to draw a filled rectangle. Shortcut: R.",
+    "editor_tool_rect_outline": "Drag to draw a rectangle outline. Shortcut: Shift+R.",
+    "editor_tool_select_move": "Select pixels or move the selected region. Shortcut: M.",
+    "editor_tool_crop": "Drag a crop rectangle and apply it to the current sprite or frame. Shortcut: C.",
+    "editor_tool_pan": "Move around the zoomed canvas without changing pixels. Shortcut: H or space-drag.",
+    "editor_tool_zoom": "Zoom the canvas around the cursor with mouse wheel or shortcut keys.",
+    "editor_tool_palette_swap": "Replace one color with another in the current editing scope.",
+    "editor_tool_hue_shift": "Shift hue, saturation, and value for the current editing scope.",
+    "editor_tool_palette_variants": "Generate alternate colorway previews for review.",
+    "editor_tool_flip": "Flip the current sprite, frame, or selected editing scope.",
+    "editor_tool_rotate": "Rotate the current sprite, frame, or selected editing scope by 90 degrees.",
+    "editor_tool_resize": "Resize the current sprite or frame with nearest-neighbor scaling.",
+    "editor_layers_panel": "Manage layer order, active layer, visibility, opacity, duplication, and deletion.",
+    "editor_palette_panel": "Inspect colors, pick foreground/background colors, swap palettes, and generate variants.",
+    "editor_help_panel": "Read current tool directions, shortcuts, and quick-start guidance.",
+    "editor_timeline_panel": "Preview and edit frames from a loaded character animation clip.",
     "editor_palette_summary": "Palette summary for the current edited sprite, sorted by dominant visible colors.",
     "editor_source_color": "Source color to replace, written as a hex color such as #ff0000.",
     "editor_target_color": "Target replacement color, written as a hex color such as #00ffff.",
@@ -1097,45 +1158,22 @@ class EditorSettingsPanel(SpriteToolPanel):
     def build(self) -> None:
         app = self.app
         with dpg.group(horizontal=True):
+            app._add_button("Fullscreen Editor", lambda *_args: app.set_editor_fullscreen(not bool(app.editor_workspace.fullscreen)), "editor_fullscreen")
             app._add_button("Load Sprite", app.load_editor_sprite_dialog, "editor_load_sprite")
             app._add_button("Save Package", app.save_editor_package, "editor_save_package")
+            app._add_button("Save To Project", app.save_editor_to_project, "editor_save_project")
         with dpg.group(horizontal=True):
-            app._add_button("Undo", app.undo_editor_edit, "editor_undo")
-            app._add_button("Redo", app.redo_editor_edit, "editor_redo")
-        with dpg.child_window(tag="editor_preview_panel", width=-1, height=145, border=True):
-            dpg.add_text("Load a sprite to edit.", wrap=260)
-        dpg.add_text("Palette: none", tag="editor_palette_label", wrap=260)
-        attach_tooltip("editor_palette_label", "editor_palette_summary")
-        dpg.add_text("Transform")
-        app._add_input_text("##editor_crop_rect", app.editor_crop_rect, "editor_crop_rect", "editor_crop_rect", width=-1)
-        with dpg.group(horizontal=True):
-            app._add_button("Crop", app.apply_editor_crop, "editor_crop")
-            app._add_input_text("##editor_resize_size", app.editor_resize_size, "editor_resize_size", "editor_resize_size", width=110)
-            app._add_button("Resize", app.apply_editor_resize, "editor_resize")
-        with dpg.group(horizontal=True):
-            app._add_combo("##editor_flip_axis", app.editor_flip_axis, ["horizontal", "vertical"], "editor_flip_axis", width=120)
-            app._add_button("Flip", app.apply_editor_flip, "editor_flip")
-            app._add_button("Rotate CW", lambda *_args: app.apply_editor_rotate(clockwise=True), "editor_rotate")
-            app._add_button("Rotate CCW", lambda *_args: app.apply_editor_rotate(clockwise=False), "editor_rotate")
-        dpg.add_text("Palette Swap")
-        with dpg.group(horizontal=True):
-            app._add_input_text("##editor_source_color", app.editor_source_color, "editor_source_color", "editor_source_color", width=120)
-            app._add_input_text("##editor_target_color", app.editor_target_color, "editor_target_color", "editor_target_color", width=120)
-        app._add_button("Swap", app.apply_editor_palette_swap, "editor_swap_colors", width=-1)
-        dpg.add_text("Color Wheel")
-        with dpg.group(horizontal=True):
-            app._add_combo("##editor_harmony", app.editor_harmony, ["complementary", "analogous", "triadic", "tetradic"], "editor_color_wheel", width=135)
-            app._add_input_text("##editor_hue_degrees", app.editor_hue_degrees, "editor_hue_degrees", "editor_hue_degrees", width=100)
-        with dpg.group(horizontal=True):
-            app._add_button("Hue Shift", app.apply_editor_hue_shift, "editor_hue_shift")
-            app._add_button("Wheel", app.preview_editor_color_wheel, "editor_color_wheel")
-        app._add_button("Palette Variants", app.generate_editor_palette_variants, "editor_palette_variants", width=-1)
-        dpg.add_text("Auto-Tile")
-        with dpg.group(horizontal=True):
-            app._add_input_text("##editor_autotile_name", app.editor_autotile_name, "editor_autotile_name", "editor_autotile_name", width=135)
-            app._add_combo("##editor_engine", app.editor_engine, ["generic", "unity", "godot", "unreal"], "engine_exports", width=100)
-        app._add_button("Generate Auto-Tile", app.generate_editor_autotile, "editor_generate_autotile", width=-1)
-        app._add_button("IDE Actions", app.show_editor_ide_actions, "editor_ide_api", width=-1)
+            with dpg.child_window(tag="editor_tool_rail", width=130, height=520, border=True):
+                app._build_editor_tool_rail()
+            with dpg.child_window(tag="editor_canvas", width=520, height=520, border=True):
+                attach_tooltip("editor_canvas", "editor_canvas")
+                app._build_editor_canvas_panel()
+            with dpg.child_window(tag="editor_side_panel", width=300, height=520, border=True):
+                app._build_editor_side_panel()
+        with dpg.child_window(tag="editor_timeline_panel", width=-1, height=130, border=True):
+            attach_tooltip("editor_timeline_panel", "editor_timeline_panel")
+            app._build_editor_timeline_panel()
+        dpg.add_text(str(app.editor_status.get()), tag="editor_status_text", wrap=920)
 
 
 class UiController:
@@ -1258,6 +1296,22 @@ class SpriteSheetToolUi:
         self.studio_taxonomy_pattern = DpgValue("{category}_{source_sheet}_{index:03d}")
         self.studio_asset_rows_cache: list[dict[str, object]] = []
         self.editor_session: SpriteEditSession | None = None
+        self.editor_workspace = EditorWorkspaceState()
+        self.editor_fullscreen = DpgValue(False)
+        self.editor_active_tool = DpgValue(self.editor_workspace.active_tool.value)
+        self.editor_tool_scope = DpgValue(self.editor_workspace.tool_scope.value)
+        self.editor_canvas_view = CanvasView(sprite_size=(1, 1), panel_size=(640, 420))
+        self.editor_cursor = DpgValue("")
+        self.editor_status = DpgValue("x=- y=- color=#-------- zoom=8.0x layer=1 frame=1")
+        self.editor_show_grid = DpgValue(True)
+        self.editor_layer_name = DpgValue("")
+        self.editor_layer_opacity = DpgValue(1.0)
+        self.editor_animation_session: AnimationEditSession | None = None
+        self.editor_animation_clip = DpgValue("")
+        self.editor_animation_fps = DpgValue(12)
+        self.editor_animation_playing = False
+        self.editor_animation_last_tick: float | None = None
+        self.editor_source_sprite_id = ""
         self.editor_crop_rect = DpgValue("0,0,16,16")
         self.editor_resize_size = DpgValue("16x16")
         self.editor_flip_axis = DpgValue("horizontal")
@@ -1791,6 +1845,330 @@ class SpriteSheetToolUi:
         except Exception as exc:
             self._show_error("Apply Outputs", str(exc))
 
+    def set_editor_fullscreen(self, enabled: bool) -> None:
+        self.editor_workspace = self.editor_workspace.with_fullscreen(enabled)
+        self.editor_fullscreen.set(enabled)
+
+    def set_editor_tool(self, tool_value: str) -> None:
+        tool = EditorTool(tool_value)
+        self.editor_workspace = self.editor_workspace.with_tool(tool)
+        self.editor_active_tool.set(tool.value)
+        self._update_editor_help_panel()
+
+    def set_editor_tool_scope(self, scope_value: str) -> None:
+        scope = ToolScope(scope_value)
+        self.editor_workspace = self.editor_workspace.with_scope(scope)
+        self.editor_tool_scope.set(scope.value)
+
+    def _refresh_editor_status(self, cursor: tuple[int, int] | None = None, color_hex: str | None = None) -> None:
+        self.editor_status.set(
+            canvas_status_text(
+                cursor,
+                color_hex,
+                self.editor_canvas_view.zoom,
+                self.editor_workspace.active_layer_index,
+                self.editor_workspace.active_frame_index,
+            )
+        )
+
+    def editor_visibility_plan(self) -> dict[str, bool]:
+        fullscreen = bool(self.editor_workspace.fullscreen)
+        return {
+            "main_panels": not fullscreen,
+            "editor_panel": True,
+            "timeline_panel": fullscreen or self.editor_animation_frames_loaded(),
+            "log_panel": not fullscreen,
+        }
+
+    def editor_animation_frames_loaded(self) -> bool:
+        return self.editor_animation_session is not None and bool(self.editor_animation_session.frames)
+
+    def _build_editor_tool_rail(self) -> None:
+        for tool, metadata in EDITOR_TOOLS.items():
+            self._add_button(metadata.label, lambda _s=None, _a=None, value=tool.value: self.set_editor_tool(value), f"editor_tool_{tool.value}", width=-1)
+        self._add_combo("##editor_tool_scope", self.editor_tool_scope, [scope.value for scope in ToolScope], "editor_tool_scope", width=-1, callback=lambda *_args: self.set_editor_tool_scope(str(self.editor_tool_scope.get())))
+
+    def _build_editor_canvas_panel(self) -> None:
+        if self.editor_session is None:
+            dpg.add_text("Load a sprite or open one from Review to begin editing.", wrap=480)
+            return
+        self.refresh_editor_preview()
+
+    def _build_editor_side_panel(self) -> None:
+        dpg.add_text("Layers")
+        with dpg.child_window(tag="editor_layers_panel", width=-1, height=130, border=True):
+            attach_tooltip("editor_layers_panel", "editor_layers_panel")
+            self._build_editor_layers_panel()
+        dpg.add_text("Palette")
+        with dpg.child_window(tag="editor_palette_panel", width=-1, height=150, border=True):
+            attach_tooltip("editor_palette_panel", "editor_palette_panel")
+            self._build_editor_palette_panel()
+        dpg.add_text("Tool Help")
+        with dpg.child_window(tag="editor_help_panel", width=-1, height=190, border=True):
+            attach_tooltip("editor_help_panel", "editor_help_panel")
+            self._build_editor_help_panel()
+
+    def _build_editor_layers_panel(self) -> None:
+        rows = self.editor_layer_rows()
+        if not rows:
+            dpg.add_text("Load a sprite to manage layers.", wrap=260)
+            return
+        for index, row in enumerate(rows):
+            self._add_button(row, lambda _s=None, _a=None, value=index: self.select_editor_layer(value), "editor_layers_panel", width=-1)
+        with dpg.group(horizontal=True):
+            self._add_button("Duplicate", self.duplicate_editor_layer, "editor_layers_panel")
+            self._add_button("Delete", self.delete_editor_layer, "editor_layers_panel")
+
+    def _build_editor_palette_panel(self) -> None:
+        rows = self.editor_palette_rows()
+        if not rows:
+            dpg.add_text("Load a sprite to inspect its palette.", wrap=260)
+            return
+        for row in rows:
+            dpg.add_text(row)
+        dpg.add_text("Swap")
+        with dpg.group(horizontal=True):
+            self._add_input_text("##editor_source_color_panel", self.editor_source_color, "editor_source_color", "editor_source_color", width=110)
+            self._add_input_text("##editor_target_color_panel", self.editor_target_color, "editor_target_color", "editor_target_color", width=110)
+        self._add_button("Apply Swap", self.apply_editor_palette_swap, "editor_swap_colors", width=-1)
+
+    def _build_editor_help_panel(self) -> None:
+        dpg.add_text(state_help_text(self.editor_workspace), tag="editor_help_text", wrap=260)
+        with dpg.group(horizontal=True):
+            self._add_button("Undo", self.undo_editor_edit, "editor_undo")
+            self._add_button("Redo", self.redo_editor_edit, "editor_redo")
+        dpg.add_text("Transform")
+        self._add_input_text("##editor_crop_rect", self.editor_crop_rect, "editor_crop_rect", "editor_crop_rect", width=-1)
+        with dpg.group(horizontal=True):
+            self._add_button("Crop", self.apply_editor_crop, "editor_crop")
+            self._add_input_text("##editor_resize_size", self.editor_resize_size, "editor_resize_size", "editor_resize_size", width=110)
+            self._add_button("Resize", self.apply_editor_resize, "editor_resize")
+        with dpg.group(horizontal=True):
+            self._add_combo("##editor_flip_axis", self.editor_flip_axis, ["horizontal", "vertical"], "editor_flip_axis", width=120)
+            self._add_button("Flip", self.apply_editor_flip, "editor_flip")
+            self._add_button("Rotate CW", lambda *_args: self.apply_editor_rotate(clockwise=True), "editor_rotate")
+            self._add_button("Rotate CCW", lambda *_args: self.apply_editor_rotate(clockwise=False), "editor_rotate")
+        with dpg.group(horizontal=True):
+            self._add_combo("##editor_harmony", self.editor_harmony, ["complementary", "analogous", "triadic", "tetradic"], "editor_color_wheel", width=135)
+            self._add_input_text("##editor_hue_degrees", self.editor_hue_degrees, "editor_hue_degrees", "editor_hue_degrees", width=100)
+        with dpg.group(horizontal=True):
+            self._add_button("Hue Shift", self.apply_editor_hue_shift, "editor_hue_shift")
+            self._add_button("Wheel", self.preview_editor_color_wheel, "editor_color_wheel")
+        self._add_button("Palette Variants", self.generate_editor_palette_variants, "editor_palette_variants", width=-1)
+        with dpg.group(horizontal=True):
+            self._add_input_text("##editor_autotile_name", self.editor_autotile_name, "editor_autotile_name", "editor_autotile_name", width=135)
+            self._add_combo("##editor_engine", self.editor_engine, ["generic", "unity", "godot", "unreal"], "engine_exports", width=100)
+        self._add_button("Generate Auto-Tile", self.generate_editor_autotile, "editor_generate_autotile", width=-1)
+        self._add_button("IDE Actions", self.show_editor_ide_actions, "editor_ide_api", width=-1)
+
+    def _build_editor_timeline_panel(self) -> None:
+        if self.editor_animation_session is None:
+            dpg.add_text("No animation loaded.", wrap=760)
+            return
+        with dpg.group(horizontal=True):
+            self._add_button("Play/Pause", self.toggle_editor_animation_playback, "play_animation")
+            dpg.add_text(f"{self.editor_animation_session.name} | fps={self.editor_animation_session.fps}")
+        for index, frame in enumerate(self.editor_animation_session.frames):
+            marker = "*" if index == self.editor_animation_session.active_frame else " "
+            self._add_button(f"{marker} {index + 1}. {frame.name}", lambda _s=None, _a=None, value=index: self.select_editor_animation_frame(value), "editor_timeline_panel")
+
+    def _update_editor_help_panel(self) -> None:
+        text = state_help_text(self.editor_workspace)
+        if dpg is not None and self._built and dpg.does_item_exist("editor_help_text"):
+            dpg.set_value("editor_help_text", text)
+
+    def handle_editor_shortcut(self, shortcut: str) -> bool:
+        action = shortcut_action_for_key(shortcut)
+        if action is None:
+            return False
+        self.editor_workspace, command = apply_shortcut_action(self.editor_workspace, action)
+        self.editor_active_tool.set(self.editor_workspace.active_tool.value)
+        self._update_editor_help_panel()
+        if command == "undo":
+            self.undo_editor_edit()
+        elif command == "redo":
+            self.redo_editor_edit()
+        elif command == "save":
+            self.save_editor_package()
+        elif command == "fit":
+            self.editor_canvas_view = CanvasView.fit(self.editor_canvas_view.sprite_size, self.editor_canvas_view.panel_size)
+        elif command == "actual_size":
+            self.editor_canvas_view = self.editor_canvas_view.zoom_around_cursor((0, 0), 1.0 / max(1.0, self.editor_canvas_view.zoom))
+        elif command == "play_pause":
+            self.toggle_editor_animation_playback()
+        self._refresh_editor_status()
+        return True
+
+    def _editor_canvas_sprite_point_from_mouse(self) -> tuple[int, int] | None:
+        if dpg is None or not self._built or not dpg.does_item_exist("editor_canvas"):
+            return None
+        mouse = dpg.get_mouse_pos(local=False)
+        rect_min = dpg.get_item_rect_min("editor_canvas")
+        local = (int(mouse[0] - rect_min[0]), int(mouse[1] - rect_min[1]))
+        return self.editor_canvas_view.screen_to_sprite(local)
+
+    def _apply_editor_mouse_gesture(self, gesture: MouseGesture) -> None:
+        if self.editor_session is None:
+            self._show_info("Editor", "Load a sprite or open one from Review to begin editing.")
+            return
+        result = apply_mouse_tool(self.editor_session, self.editor_workspace, gesture)
+        if result.sampled_color is not None:
+            self.editor_source_color.set(result.sampled_color)
+            self.editor_workspace = self.editor_workspace.with_tool(EditorTool.PENCIL)
+            self.editor_active_tool.set(EditorTool.PENCIL.value)
+        if result.crop_rect is not None:
+            self.editor_crop_rect.set(",".join(str(part) for part in result.crop_rect))
+        if result.selected_region is not None:
+            self.editor_workspace = replace(self.editor_workspace, selected_region=result.selected_region)
+        if result.pan_delta is not None:
+            self.editor_canvas_view = self.editor_canvas_view.panned(result.pan_delta)
+        if result.zoom_factor is not None:
+            self.editor_canvas_view = self.editor_canvas_view.zoom_around_cursor(gesture.start, result.zoom_factor)
+        self.refresh_editor_preview()
+        self._refresh_editor_status(gesture.end or gesture.start)
+
+    def editor_layer_rows(self) -> list[str]:
+        if self.editor_session is None:
+            return []
+        rows = []
+        for index, layer in enumerate(self.editor_session.layers):
+            active = "*" if index == self.editor_session.active_layer else " "
+            visible = "visible" if layer.visible else "hidden"
+            rows.append(f"{active} {index + 1}. {layer.name} {visible} opacity={layer.opacity:.2f}")
+        return rows
+
+    def select_editor_layer(self, index: int) -> None:
+        if self.editor_session is None:
+            self._show_info("Layers", "Load a sprite before selecting a layer.")
+            return
+        self.editor_session.select_layer(index)
+        self.editor_workspace = replace(self.editor_workspace, active_layer_index=index)
+        self.refresh_editor_preview()
+
+    def duplicate_editor_layer(self, *_args: object) -> None:
+        if self.editor_session is None:
+            self._show_info("Layers", "Load a sprite before duplicating a layer.")
+            return
+        self.editor_session.duplicate_layer(self.editor_session.active_layer)
+        self.editor_workspace = replace(self.editor_workspace, active_layer_index=self.editor_session.active_layer)
+        self.refresh_editor_preview()
+
+    def delete_editor_layer(self, *_args: object) -> None:
+        if self.editor_session is None:
+            self._show_info("Layers", "Load a sprite before deleting a layer.")
+            return
+        self.editor_session.delete_layer(self.editor_session.active_layer)
+        self.editor_workspace = replace(self.editor_workspace, active_layer_index=self.editor_session.active_layer)
+        self.refresh_editor_preview()
+
+    def editor_palette_rows(self) -> list[str]:
+        if self.editor_session is None:
+            return []
+        return palette_swatch_rows(self.editor_session.composite(), active_color=str(self.editor_source_color.get()))
+
+    def editor_help_reference_text(self) -> str:
+        shortcuts = "\n".join(f"{key}: {value}" for key, value in sorted(EDITOR_SHORTCUTS.items()))
+        tools = "\n".join(f"{metadata.label}: {metadata.help_text}" for metadata in EDITOR_TOOLS.values())
+        return (
+            "Quick Start\n"
+            "Load a sprite, choose a tool, edit on the canvas, then save a package or save back to the project.\n\n"
+            "Mouse\n"
+            "Left click edits with the active tool. Drag previews lines, rectangles, crops, and pans. Mouse wheel zooms on the canvas.\n\n"
+            "Shortcuts\n"
+            f"{shortcuts}\n\n"
+            "Tools\n"
+            f"{tools}\n\n"
+            "Animation\n"
+            "Load a project clip, select a frame, play the preview, edit one frame or all frames, then save applied animation output."
+        )
+
+    def load_editor_animation_clip_from_project(self, clip_name: str) -> None:
+        if self.current_project is None:
+            self._show_info("Animation", "Load a SpriteCut project before opening animation clips.")
+            return
+        clips = self.current_project.get("animation_clips", [])
+        clip = next((item for item in clips if isinstance(item, dict) and item.get("name") == clip_name), None) if isinstance(clips, list) else None
+        if not isinstance(clip, dict):
+            self._show_info("Animation", f"Animation clip not found: {clip_name}")
+            return
+        frame_refs: list[AnimationFrameRef] = []
+        for frame in clip.get("frames", []):
+            if not isinstance(frame, dict):
+                continue
+            path_text = str(frame.get("source_file", ""))
+            path = self._resolve_project_path(path_text) if path_text else None
+            if path is not None and path.exists():
+                frame_refs.append(AnimationFrameRef(str(frame.get("sprite", "")), path, float(frame.get("duration", 0.0833))))
+        if not frame_refs:
+            self._show_info("Animation", "No readable frames were found for this clip.")
+            return
+        self.editor_animation_session = AnimationEditSession.from_frame_refs(str(clip_name), frame_refs, fps=int(clip.get("frame_rate", 12)))
+        self.editor_animation_clip.set(str(clip_name))
+        self.editor_animation_fps.set(self.editor_animation_session.fps)
+        self.editor_session = self.editor_animation_session.frames[0]
+        self.editor_workspace = replace(self.editor_workspace, active_frame_index=0)
+        self.refresh_editor_preview()
+
+    def toggle_editor_animation_playback(self, *_args: object) -> None:
+        self.editor_animation_playing = not self.editor_animation_playing
+        self.editor_animation_last_tick = None
+
+    def select_editor_animation_frame(self, index: int) -> None:
+        if self.editor_animation_session is None:
+            return
+        index = max(0, min(len(self.editor_animation_session.frames) - 1, int(index)))
+        self.editor_animation_session.active_frame = index
+        self.editor_session = self.editor_animation_session.frames[index]
+        self.editor_workspace = replace(self.editor_workspace, active_frame_index=index)
+        self.refresh_editor_preview()
+
+    def tick_editor_animation(self, now: float | None = None) -> None:
+        if not self.editor_animation_playing or self.editor_animation_session is None:
+            return
+        current_time = time.monotonic() if now is None else float(now)
+        if self.editor_animation_last_tick is not None and current_time - self.editor_animation_last_tick < 1.0 / max(1, int(self.editor_animation_fps.get())):
+            return
+        self.editor_animation_last_tick = current_time
+        self.select_editor_animation_frame(playback_next_frame(self.editor_animation_session.active_frame, len(self.editor_animation_session.frames)))
+
+    def open_selected_review_sprite_in_editor(self, *_args: object) -> None:
+        sprite = self._selected_project_sprite()
+        if sprite is None:
+            self._show_info("Editor", "Select a Review sprite before opening it in the editor.")
+            return
+        preview = project_sprite_preview_path_text(sprite)
+        if not preview:
+            self._show_info("Editor", "The selected sprite has no output image to edit.")
+            return
+        path = self._resolve_project_path(preview)
+        if not path.exists():
+            self._show_info("Editor", f"Missing sprite image: {path}")
+            return
+        self.editor_source_sprite_id = str(sprite["id"])
+        self.load_editor_sprite(path)
+        self.set_editor_fullscreen(True)
+
+    def save_editor_to_project(self, *_args: object) -> None:
+        if self.current_project is None or self.current_project_path is None:
+            self._show_info("Editor", "Load a SpriteCut project before saving editor output back to a project.")
+            return
+        if self.editor_animation_session is not None:
+            output = write_applied_animation(self.editor_animation_session, self.current_project_path.parent / "applied_project" / "animations")
+            self.current_project = attach_animation_edit_output(self.current_project, self.editor_animation_session.name, str(output["manifest"]))
+            save_project(self.current_project, self.current_project_path)
+            self._show_info("Editor", f"Saved edited animation: {output['manifest']}")
+            return
+        if self.editor_session is None or not self.editor_source_sprite_id:
+            self._show_info("Editor", "Open a project sprite in the editor before saving back to the project.")
+            return
+        output_dir = self.current_project_path.parent / "applied_project" / "sprites" / "edited"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{self.editor_source_sprite_id}.png"
+        self.editor_session.composite().save(output_path)
+        self.current_project = attach_sprite_edit_output(self.current_project, self.editor_source_sprite_id, str(output_path))
+        save_project(self.current_project, self.current_project_path)
+        self._show_info("Editor", f"Saved edited sprite: {output_path}")
+
     def load_editor_sprite_dialog(self, *_args: object) -> None:
         if dpg is not None:
             dpg.show_item("editor_sprite_dialog")
@@ -1803,11 +2181,19 @@ class SpriteSheetToolUi:
     def load_editor_sprite(self, path: Path) -> None:
         try:
             self.editor_session = SpriteEditSession.open(path)
+            self.editor_animation_session = None
+            self.editor_source_sprite_id = self.editor_source_sprite_id or ""
             self.editor_autotile_name.set(path.stem)
             self.append_log(f"Loaded editor sprite: {path}")
             self.refresh_editor_preview()
         except Exception as exc:
             self._show_error("Load Sprite", str(exc))
+
+    def _load_editor_sprite_impl(self, path: Path) -> None:
+        self.load_editor_sprite(path)
+
+    def _refresh_editor_preview(self) -> None:
+        self.refresh_editor_preview()
 
     def refresh_editor_preview(self) -> None:
         if self.editor_session is None:
@@ -1815,6 +2201,8 @@ class SpriteSheetToolUi:
             self._set_text("editor_palette_label", "Palette: none")
             return
         image = self.editor_session.composite()
+        self.editor_canvas_view = replace(self.editor_canvas_view, sprite_size=image.size)
+        self._refresh_editor_status()
         preview = image.copy()
         preview.thumbnail((180, 135), Image.Resampling.NEAREST)
         self._show_image_in_panel("editor_preview_panel", "editor", preview)

@@ -57,11 +57,14 @@ The UI also includes a `Studio` tab for production handoff. It adds a health sco
 
 The `Editor` tab adds sprite-level editing and recoloring:
 
+- Use the embedded workspace or `Fullscreen Editor` mode for mouse tools, keyboard shortcuts, layers, palette controls, animation timeline preview, contextual help, and project-attached saves.
 - Load a single sprite into a non-destructive edit session.
 - Extract dominant palette colors.
 - Swap exact colors, preserve transparency, and save an edit manifest.
 - Apply hue-wheel recolors and preview complementary/analogous/triadic/tetradic palettes.
 - Generate 16-mask cardinal auto-tile sheets and Unity/Godot/Unreal-ready rule metadata.
+
+The `Editor` tab now includes an embedded workspace and a `Fullscreen Editor` mode with mouse tools, keyboard shortcuts, layers, palette controls, animation timeline preview, contextual help, and project-attached saves.
 
 For IDEs and scripts, call the JSON API:
 

@@ -42,6 +42,33 @@ def save_project(project: dict[str, Any], path: Path) -> None:
     path.write_text(json.dumps(project, indent=2), encoding="utf-8")
 
 
+def attach_sprite_edit_output(project: dict[str, object], sprite_id: str, applied_output_file: str) -> dict[str, object]:
+    updated = copy.deepcopy(project)
+    sprites = updated.get("sprites", [])
+    if not isinstance(sprites, list):
+        raise ValueError("Project sprites must be a list.")
+    for sprite in sprites:
+        if isinstance(sprite, dict) and sprite.get("id") == sprite_id:
+            sprite["applied_output_file"] = applied_output_file
+            sprite["review_status"] = "approved"
+            flags = sprite.get("review_flags", [])
+            sprite["review_flags"] = [flag for flag in flags if flag != "edited"] if isinstance(flags, list) else []
+            return updated
+    raise ValueError(f"Sprite not found: {sprite_id}")
+
+
+def attach_animation_edit_output(project: dict[str, object], clip_name: str, manifest_path: str) -> dict[str, object]:
+    updated = copy.deepcopy(project)
+    clips = updated.get("animation_clips", [])
+    if not isinstance(clips, list):
+        raise ValueError("Project animation_clips must be a list.")
+    for clip in clips:
+        if isinstance(clip, dict) and clip.get("name") == clip_name:
+            clip["applied_manifest"] = manifest_path
+            return updated
+    raise ValueError(f"Animation clip not found: {clip_name}")
+
+
 def find_sprite(project: dict[str, Any], sprite_id: str) -> dict[str, Any]:
     sprites = project.get("sprites")
     if not isinstance(sprites, list):

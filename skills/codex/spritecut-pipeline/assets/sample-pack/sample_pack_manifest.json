@@ -1,0 +1,9 @@
+{
+  "name": "spritecut-sample-pack",
+  "description": "Tiny safe fixtures for smoke-testing SpriteCut skill commands.",
+  "files": {
+    "misaligned_sheet.png": "Transparent 64x48 sheet with off-grid colored sprite blocks.",
+    "palette_swap_request.json": "IDE API palette.swap request using relative input and output paths.",
+    "autotile_request.json": "IDE API autotile.generate request using relative input and output paths."
+  }
+}

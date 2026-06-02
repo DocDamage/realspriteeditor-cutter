@@ -1,0 +1,8 @@
+{
+  "action": "palette.swap",
+  "input": "misaligned_sheet.png",
+  "output": "outputs/misaligned_sheet_blue.png",
+  "swaps": {
+    "#ff0000": "#0068ff"
+  }
+}

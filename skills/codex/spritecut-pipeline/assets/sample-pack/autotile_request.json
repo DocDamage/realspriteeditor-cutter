@@ -1,0 +1,7 @@
+{
+  "action": "autotile.generate",
+  "input": "misaligned_sheet.png",
+  "output_dir": "outputs/misaligned_autotile",
+  "name": "misaligned_sample",
+  "engine": "godot"
+}

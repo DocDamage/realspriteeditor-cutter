@@ -1,0 +1,4 @@
+interface:
+  display_name: "SpriteCut Pipeline"
+  short_description: "Cut, review, recolor, and autotile sprites."
+  default_prompt: "Use $spritecut-pipeline to cut misaligned sprite sheets, review outputs, recolor sprites, generate autotiles, and call the IDE JSON API."

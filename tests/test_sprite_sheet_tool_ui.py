@@ -10,6 +10,7 @@ from pathlib import Path
 
 from PIL import Image
 
+import tools.sprite_sheet_tool_ui as ui_module
 from tools.sprite_sheet_tool_ui import (
     CutterUiSettings,
     SpriteSheetToolUi,
@@ -96,6 +97,17 @@ def sample_project() -> dict[str, object]:
 
 
 class SpriteSheetToolUiTests(unittest.TestCase):
+    @unittest.skipUnless(
+        ui_module.dpg is not None and sys.platform.startswith("win"),
+        "Dear PyGUI construction smoke test requires the optional Windows UI dependency",
+    )
+    def test_dearpygui_ui_constructs_without_container_errors(self) -> None:
+        try:
+            app = SpriteSheetToolUi()
+            self.assertIsInstance(app, SpriteSheetToolUi)
+        finally:
+            ui_module.dpg.destroy_context()
+
     def test_discover_sheet_files_finds_supported_images_and_skips_output_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

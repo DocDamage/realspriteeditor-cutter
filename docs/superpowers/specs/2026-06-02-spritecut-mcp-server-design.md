@@ -6,7 +6,9 @@ Add a first-class Model Context Protocol server so MCP-aware IDEs and agents can
 
 ## Scope
 
-The first version is a local stdio MCP server. It exposes the existing SpriteCut IDE JSON actions as typed MCP tools and keeps `tools/sprite_ide_api.py` as the source of truth for behavior.
+The first version is a local stdio MCP server. It exposes the existing SpriteCut IDE JSON actions as typed MCP tools and keeps `tools/sprite_ide_api.py` as the source of truth for editor, palette, and autotile behavior.
+
+V2 expands the server for both agent coding assistants and game-dev workflow automation. It adds resources, prompts, setup helpers, and project-level production tools.
 
 ## Architecture
 
@@ -19,7 +21,7 @@ The server runs over stdio by default. It must not write normal logs to stdout b
 
 ## Tools
 
-The MCP server exposes:
+The MCP server exposes editor tools:
 
 - `palette_extract`
 - `palette_swap`
@@ -29,7 +31,37 @@ The MCP server exposes:
 - `sprite_batch_edit`
 - `autotile_generate`
 
+It also exposes setup and production tools:
+
+- `mcp_health_check`
+- `mcp_client_config`
+- `create_sample_pack`
+- `process_sheets`
+- `load_project_summary`
+- `review_dashboard`
+- `apply_project_outputs`
+- `review_and_apply_project`
+- `generate_import_plans`
+
 Tool names use underscore style for MCP readability, while payloads map directly to the existing dot-style actions in `sprite_ide_api.py`.
+
+## Resources
+
+Resources provide agent-readable context:
+
+- `spritecut://actions`
+- `spritecut://commands`
+- `spritecut://quality-checklist`
+- `spritecut://sample-pack`
+
+## Prompts
+
+Prompts help agents produce useful SpriteCut workflows:
+
+- `review_sprite_project`
+- `plan_palette_variants`
+- `generate_sprite_edit_request`
+- `prepare_engine_handoff`
 
 ## Dependencies
 
@@ -38,6 +70,8 @@ Tool names use underscore style for MCP readability, while payloads map directly
 ## Error Handling
 
 Wrapper functions raise the same validation errors as `run_ide_command`, so callers get consistent failures across CLI and MCP. The MCP entrypoint exits with a clear stderr message if the optional MCP SDK is missing.
+
+Production tools capture cutter stdout/stderr and return it in JSON-compatible result payloads so stdio MCP protocol output stays clean.
 
 ## Documentation
 
@@ -49,4 +83,4 @@ python tools\sprite_mcp_server.py
 
 ## Testing
 
-Tests cover direct wrapper calls, action-name mapping, validation errors, server factory behavior when the MCP dependency is absent or mocked, and packaging inclusion of the MCP server and requirements.
+Tests cover direct wrapper calls, action-name mapping, resources, prompts, production workflow helpers, server factory behavior when the MCP dependency is absent or mocked, and packaging inclusion of the MCP server and requirements.

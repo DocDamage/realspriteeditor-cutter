@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a local stdio MCP server that exposes SpriteCut IDE JSON API actions as MCP tools.
+**Goal:** Add a local stdio MCP server that exposes SpriteCut IDE JSON API actions, agent resources/prompts, setup helpers, and production workflow tools.
 
 **Architecture:** Keep `tools/sprite_ide_api.py` as the behavior source of truth. Add a thin, testable `tools/sprite_mcp_server.py` wrapper with lazy MCP SDK imports so the rest of the project remains usable without optional MCP dependencies.
 
@@ -62,7 +62,59 @@ Run: `python -m unittest tests.test_sprite_mcp_server -v`
 
 Expected: all MCP tests pass.
 
-### Task 3: Docs, Requirements, Packaging
+### Task 3: Agent Resources, Prompts, And Setup Helpers
+
+**Files:**
+- Modify: `tests/test_sprite_mcp_server.py`
+- Modify: `tools/sprite_mcp_server.py`
+
+- [ ] **Step 1: Write failing tests**
+
+Tests should assert `spritecut://actions`, `spritecut://commands`, `spritecut://quality-checklist`, and `spritecut://sample-pack` resources are registered and return useful text. Tests should assert prompts return strings containing the requested project/path/engine details. Tests should assert `mcp_health_check` and `mcp_client_config` return JSON-compatible setup information.
+
+- [ ] **Step 2: Verify tests fail**
+
+Run: `python -m unittest tests.test_sprite_mcp_server -v`
+
+Expected: failures for missing resources, prompts, and setup helpers.
+
+- [ ] **Step 3: Implement resources, prompts, and setup helpers**
+
+Add resource functions, prompt functions, helper tools, and register them in `build_mcp_server`.
+
+- [ ] **Step 4: Verify tests pass**
+
+Run: `python -m unittest tests.test_sprite_mcp_server -v`
+
+Expected: all MCP tests pass.
+
+### Task 4: Production Workflow Tools
+
+**Files:**
+- Modify: `tests/test_sprite_mcp_server.py`
+- Modify: `tools/sprite_mcp_server.py`
+
+- [ ] **Step 1: Write failing tests**
+
+Tests should create small synthetic sheets/projects and verify `create_sample_pack`, `process_sheets`, `load_project_summary`, `review_dashboard`, `apply_project_outputs`, `review_and_apply_project`, and `generate_import_plans`.
+
+- [ ] **Step 2: Verify tests fail**
+
+Run: `python -m unittest tests.test_sprite_mcp_server -v`
+
+Expected: failures for missing production tools.
+
+- [ ] **Step 3: Implement production workflow tools**
+
+Use existing cutter, project, studio, and golden fixture modules. Capture cutter stdout/stderr and return logs in the result payload.
+
+- [ ] **Step 4: Verify tests pass**
+
+Run: `python -m unittest tests.test_sprite_mcp_server -v`
+
+Expected: all MCP tests pass.
+
+### Task 5: Docs, Requirements, Packaging
 
 **Files:**
 - Create: `requirements-mcp.txt`
@@ -90,7 +142,7 @@ Run: `python -m unittest tests.test_golden_and_packaging -v`
 
 Expected: packaging/doc tests pass.
 
-### Task 4: Full Verification
+### Task 6: Full Verification
 
 **Files:**
 - All changed files

@@ -137,6 +137,9 @@ class GoldenAndPackagingTests(unittest.TestCase):
         self.assertIn("SpriteCut MCP Server", text)
         self.assertIn("tools\\sprite_mcp_server.py", text)
         self.assertIn("requirements-mcp.txt", text)
+        self.assertIn("spritecut://quality-checklist", text)
+        self.assertIn("review_and_apply_project", text)
+        self.assertIn("mcp_client_config", text)
 
 
 if __name__ == "__main__":

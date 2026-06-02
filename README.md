@@ -80,7 +80,23 @@ Configure your MCP client to launch:
 python tools\sprite_mcp_server.py
 ```
 
-The server exposes `palette_extract`, `palette_swap`, `palette_hue_shift`, `palette_variants`, `sprite_edit`, `sprite_batch_edit`, and `autotile_generate`. These MCP tools call the same backend as `tools\sprite_ide_api.py`, so CLI and MCP behavior stay aligned.
+The server exposes editor tools (`palette_extract`, `palette_swap`, `palette_hue_shift`, `palette_variants`, `sprite_edit`, `sprite_batch_edit`, `autotile_generate`), setup helpers (`mcp_health_check`, `mcp_client_config`), and production workflow tools (`create_sample_pack`, `process_sheets`, `load_project_summary`, `review_dashboard`, `apply_project_outputs`, `review_and_apply_project`, `generate_import_plans`).
+
+It also gives agents context resources:
+
+- `spritecut://actions`
+- `spritecut://commands`
+- `spritecut://quality-checklist`
+- `spritecut://sample-pack`
+
+And workflow prompts:
+
+- `review_sprite_project`
+- `plan_palette_variants`
+- `generate_sprite_edit_request`
+- `prepare_engine_handoff`
+
+Use `mcp_client_config` to generate a ready-to-copy stdio config object for clients that use JSON-style MCP server configuration. The editor, palette, and autotile MCP tools call the same backend as `tools\sprite_ide_api.py`, so CLI and MCP behavior stay aligned.
 
 ## Agent Skills
 

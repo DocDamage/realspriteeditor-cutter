@@ -38,6 +38,13 @@ except ModuleNotFoundError:
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 SCRIPT_PATH = Path(__file__).with_name("cut_tileset_sprites.py")
 PREVIEW_ACCESSIBILITY_MODES = ["normal", "grayscale", "protanopia", "deuteranopia", "tritanopia"]
+VIEWPORT_SIZE = (1320, 820)
+LEFT_PANEL_WIDTH = 300
+CENTER_PANEL_WIDTH = 660
+RIGHT_PANEL_WIDTH = 340
+PREVIEW_MAX_SIZE = (620, 480)
+REVIEW_CANVAS_SIZE = (300, 180)
+REVIEW_IMAGE_PREVIEW_SIZE = (190, 130)
 TOOLTIP_TEXT: dict[str, str] = {
     "input_path": "Folder or image file to process. Folder scans skip prior SpriteCut output folders automatically.",
     "add_folder": "Choose a folder containing sprite sheets or nested asset folders.",
@@ -791,6 +798,7 @@ class SpriteSheetToolUi:
         self.file_list: DpgSelectableList | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.log_lines: list[str] = []
+        self.last_message: tuple[str, str, str] | None = None
         self.worker: threading.Thread | None = None
         self.active_process: subprocess.Popen[str] | None = None
         self.latest_output_dir: Path | None = None
@@ -803,6 +811,7 @@ class SpriteSheetToolUi:
         self.review_canvas_drag_start: tuple[int, int] | None = None
         self.review_canvas_bbox_start: dict[str, int] | None = None
         self.review_canvas_rect: tuple[int, int, int, int] | None = None
+        self.review_canvas_drag_dirty = False
 
         self.review_status_filter = DpgValue("all")
         self.review_query = DpgValue("")
@@ -909,13 +918,13 @@ class SpriteSheetToolUi:
             return
         with dpg.window(tag=self._main_window, label="Sprite Sheet Processor", no_title_bar=True):
             with dpg.group(horizontal=True):
-                with dpg.child_window(width=285, height=-1, border=True):
+                with dpg.child_window(width=LEFT_PANEL_WIDTH, height=-1, border=True):
                     self._build_left_panel()
-                with dpg.child_window(width=590, height=-1, border=True):
+                with dpg.child_window(width=CENTER_PANEL_WIDTH, height=-1, border=True):
                     self._build_center_panel()
-                with dpg.child_window(width=310, height=-1, border=True):
+                with dpg.child_window(width=RIGHT_PANEL_WIDTH, height=-1, border=True):
                     self._build_right_panel()
-        dpg.create_viewport(title="Sprite Sheet Processor", width=1180, height=760)
+        dpg.create_viewport(title="Sprite Sheet Processor", width=VIEWPORT_SIZE[0], height=VIEWPORT_SIZE[1])
         dpg.set_primary_window(self._main_window, True)
         with dpg.handler_registry(tag="spritecut_global_handlers"):
             dpg.add_mouse_drag_handler(button=dpg.mvMouseButton_Left, callback=self._on_review_canvas_drag)
@@ -937,13 +946,13 @@ class SpriteSheetToolUi:
     def _build_center_panel(self) -> None:
         with dpg.group(horizontal=True):
             dpg.add_text("Preview")
-            dpg.add_spacer(width=260)
+            dpg.add_spacer(width=330)
             self._add_combo("##preview_accessibility", self.preview_accessibility_mode, PREVIEW_ACCESSIBILITY_MODES, "preview_accessibility", width=150, callback=lambda *_args: self.update_preview())
-        with dpg.child_window(tag="preview_panel", width=-1, height=480, border=True):
-            dpg.add_text("Choose a folder or file to preview sheets.", tag="preview_placeholder", wrap=540)
+        with dpg.child_window(tag="preview_panel", width=-1, height=520, border=True):
+            dpg.add_text("Choose a folder or file to preview sheets.", tag="preview_placeholder", wrap=620)
         with dpg.group(horizontal=True):
             dpg.add_text("Idle", tag="progress_text")
-            self._add_button("Process", self.process, "process")
+            self._add_button("Process", self.process, "process", tag="process_button")
             self._add_button("Reset Log", self.clear_log, "reset_log")
             self._add_button("Cancel", self.cancel_process, "cancel", tag="cancel_button", enabled=False)
         with dpg.group(horizontal=True):
@@ -1033,10 +1042,10 @@ class SpriteSheetToolUi:
             pass
         attach_tooltip("review_list_panel", "review_list")
         self._review_list = DpgSelectableList("review_list_panel", multi=True, on_select=self.populate_review_editor)
-        with dpg.child_window(tag="review_image_panel", width=-1, height=115, border=True):
+        with dpg.child_window(tag="review_image_panel", width=-1, height=140, border=True):
             dpg.add_text("Load a project to review sprites.", wrap=260)
         with dpg.group(tag="review_source_canvas_frame"):
-            dpg.add_drawlist(tag="review_source_canvas", width=260, height=145)
+            dpg.add_drawlist(tag="review_source_canvas", width=REVIEW_CANVAS_SIZE[0], height=REVIEW_CANVAS_SIZE[1])
         attach_tooltip("review_source_canvas_frame", "review_source_canvas")
         with dpg.item_handler_registry(tag="review_canvas_handlers"):
             dpg.add_item_clicked_handler(callback=self._on_review_canvas_press)
@@ -1196,13 +1205,16 @@ class SpriteSheetToolUi:
     def mainloop(self) -> None:
         self.run()
 
-    def _show_message(self, title: str, text: str) -> None:
+    def _show_message(self, title: str, text: str, *, level: str = "info") -> None:
+        self.last_message = (title, text, level)
+        prefix = "Error" if level == "error" else "Info"
+        self.append_log(f"{prefix} - {title}: {text}")
         if dpg is None or not self._built:
             print(f"{title}: {text}", file=sys.stderr)
             return
         tag = f"message_{uuid4().hex}"
-        with dpg.window(label=title, tag=tag, modal=True, no_resize=True, width=460, height=170):
-            dpg.add_text(text, wrap=420)
+        with dpg.window(label=title, tag=tag, modal=True, no_resize=True, width=520, height=190):
+            dpg.add_text(text, wrap=480)
             dpg.add_spacer(height=8)
             dpg.add_button(label="OK", callback=lambda: dpg.delete_item(tag), width=90)
 
@@ -1210,7 +1222,7 @@ class SpriteSheetToolUi:
         self._show_message(title, text)
 
     def _show_error(self, title: str, text: str) -> None:
-        self._show_message(title, text)
+        self._show_message(title, text, level="error")
 
     def _dialog_path(self, app_data: object) -> Path | None:
         if not isinstance(app_data, dict):
@@ -1250,10 +1262,12 @@ class SpriteSheetToolUi:
         if self.file_list is not None:
             self.file_list.clear()
         if not path_text:
+            self._show_text_panel("preview_panel", "Choose a folder or file to preview sheets.")
             return
 
         root = Path(path_text)
         if not root.exists():
+            self._show_text_panel("preview_panel", f"Missing input: {root}")
             self.append_log(f"Missing input: {root}")
             return
 
@@ -1262,6 +1276,8 @@ class SpriteSheetToolUi:
             self.file_list.set_items([path.name for path in self.sheet_files], select_first=bool(self.sheet_files))
         if self.sheet_files:
             self.update_preview()
+        else:
+            self._show_text_panel("preview_panel", "No supported sheet images found.")
         self.append_log(f"Loaded {len(self.sheet_files)} sheet(s).")
 
     def update_preview(self, *_args: object) -> None:
@@ -1273,12 +1289,13 @@ class SpriteSheetToolUi:
         path = self.sheet_files[selection[0]]
         try:
             boxes = detect_preview_boxes(path, self.current_settings(show_error=False))
-            preview = render_detection_preview(path, boxes, max_size=(560, 430))
+            preview = render_detection_preview(path, boxes, max_size=PREVIEW_MAX_SIZE)
             preview = apply_preview_accessibility_mode(preview, str(self.preview_accessibility_mode.get()))
             self._show_image_in_panel("preview_panel", "preview", preview, fallback_text="")
             self.append_log(f"Preview detected {len(boxes)} region(s) in {path.name}.")
         except Exception as exc:
             self._show_text_panel("preview_panel", f"Preview failed: {exc}")
+            self.append_log(f"Preview failed for {path.name}: {exc}")
 
     def current_settings(self, *, show_error: bool = True) -> CutterUiSettings | None:
         path_text = str(self.input_path.get()).strip()
@@ -1655,8 +1672,13 @@ class SpriteSheetToolUi:
                 naming_rules=studio_default_taxonomy_rules(str(self.studio_taxonomy_pattern.get())),
             )
             output_dir = Path(str(result["output_dir"]))
-            self.latest_output_dir = output_dir
-            self._set_button_enabled("open_output_button", True)
+            self._set_latest_run_targets(
+                RunOutputTargets(
+                    output_dir=output_dir,
+                    report_path=output_dir / "manifest" / "report.html",
+                    project_path=self.current_project_path,
+                )
+            )
             self.append_log(
                 "Review + Apply complete: "
                 f"rendered={result['apply']['rendered']} "
@@ -1673,6 +1695,7 @@ class SpriteSheetToolUi:
             self._review_list.clear()
         self.project_sprite_rows_cache = []
         if self.current_project is None:
+            self._clear_review_editor("Load a project to review sprites.")
             self.refresh_studio_panel()
             return
         rows = project_sprite_rows(self.current_project, str(self.review_status_filter.get()), str(self.review_query.get()))
@@ -1681,7 +1704,27 @@ class SpriteSheetToolUi:
             self._review_list.set_items([format_project_sprite_label(sprite) for sprite in rows], select_first=bool(rows))
         if rows:
             self.populate_review_editor()
+        else:
+            self._clear_review_editor("No sprites match the current review filter.")
         self.refresh_studio_panel()
+
+    def _clear_review_editor(self, message: str) -> None:
+        self.review_animation_active = False
+        self.review_animation_next_time = None
+        self.review_name.set("")
+        self.review_category.set("")
+        self.review_bbox_x.set("")
+        self.review_bbox_y.set("")
+        self.review_bbox_width.set("")
+        self.review_bbox_height.set("")
+        self.review_pivot_x.set("")
+        self.review_pivot_y.set("")
+        self.review_status.set("needs_review")
+        self.review_flags.set("")
+        self.review_split_boxes.set("")
+        self._show_text_panel("review_image_panel", message)
+        self._clear_item_children("review_source_canvas")
+        self._draw_canvas_text(message)
 
     def refresh_project_animation_clips(self) -> None:
         clip_names = project_animation_clip_names(self.current_project) if self.current_project is not None else []
@@ -1753,7 +1796,7 @@ class SpriteSheetToolUi:
     def _show_review_image_path(self, path: Path) -> None:
         try:
             image = Image.open(path).convert("RGBA")
-            image.thumbnail((160, 110), Image.Resampling.NEAREST)
+            image.thumbnail(REVIEW_IMAGE_PREVIEW_SIZE, Image.Resampling.NEAREST)
             self._show_image_in_panel("review_image_panel", "review", image.copy())
             image.close()
         except Exception as exc:
@@ -1772,7 +1815,7 @@ class SpriteSheetToolUi:
             return
         try:
             image = Image.open(path).convert("RGBA")
-            canvas_size = (260, 145)
+            canvas_size = REVIEW_CANVAS_SIZE
             int_bbox = {"x": int(bbox["x"]), "y": int(bbox["y"]), "width": int(bbox["width"]), "height": int(bbox["height"])}
             scaled = scale_bbox_for_canvas(int_bbox, image.size, canvas_size)
             display_size = (int(round(image.width * float(scaled["scale"]))), int(round(image.height * float(scaled["scale"]))))
@@ -1818,6 +1861,7 @@ class SpriteSheetToolUi:
         if x0 <= pos[0] <= x1 and y0 <= pos[1] <= y1:
             self.review_canvas_drag_start = pos
             self.review_canvas_bbox_start = bbox
+            self.review_canvas_drag_dirty = False
 
     def _on_review_canvas_drag(self, *_args: object) -> None:
         if self.review_canvas_drag_start is None or self.review_canvas_bbox_start is None:
@@ -1832,6 +1876,7 @@ class SpriteSheetToolUi:
         self.review_bbox_y.set(str(bbox["y"]))
         self.review_bbox_width.set(str(bbox["width"]))
         self.review_bbox_height.set(str(bbox["height"]))
+        self.review_canvas_drag_dirty = True
         sprite = self._selected_project_sprite()
         if sprite is not None:
             preview_sprite = dict(sprite)
@@ -1839,8 +1884,13 @@ class SpriteSheetToolUi:
             self._update_review_source_canvas(preview_sprite)
 
     def _on_review_canvas_release(self, *_args: object) -> None:
+        if self.review_canvas_drag_dirty:
+            bbox = self._current_bbox_fields()
+            if bbox is not None:
+                self.append_log(f"BBox draft updated: {bbox['x']},{bbox['y']},{bbox['width']},{bbox['height']}")
         self.review_canvas_drag_start = None
         self.review_canvas_bbox_start = None
+        self.review_canvas_drag_dirty = False
 
     def play_review_animation(self, *_args: object) -> None:
         if self.current_project is None:
@@ -2043,6 +2093,7 @@ class SpriteSheetToolUi:
 
     def _set_processing(self, active: bool) -> None:
         self._set_text("progress_text", "Processing..." if active else "Idle")
+        self._set_button_enabled("process_button", not active)
         self._set_button_enabled("cancel_button", active)
 
     def _set_latest_run_targets(self, targets: RunOutputTargets | None) -> None:

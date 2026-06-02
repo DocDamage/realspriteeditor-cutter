@@ -53,7 +53,10 @@ class GoldenAndPackagingTests(unittest.TestCase):
             self.assertTrue(path.exists(), str(path))
 
         self.assertIn("AAA", guide.read_text(encoding="utf-8"))
-        self.assertIn("sprite_sheet_tool_ui.py", batch_launcher.read_text(encoding="utf-8"))
+        launcher_text = batch_launcher.read_text(encoding="utf-8")
+        self.assertIn("sprite_sheet_tool_ui.py", launcher_text)
+        self.assertIn("%*", launcher_text)
+        self.assertIn("pause", launcher_text.lower())
 
     def test_package_script_accepts_absolute_output_dir(self) -> None:
         shell = shutil.which("powershell") or shutil.which("pwsh")

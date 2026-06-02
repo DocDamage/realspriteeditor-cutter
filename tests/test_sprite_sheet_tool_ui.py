@@ -108,6 +108,64 @@ class SpriteSheetToolUiTests(unittest.TestCase):
         finally:
             ui_module.dpg.destroy_context()
 
+    @unittest.skipUnless(
+        ui_module.dpg is not None and sys.platform.startswith("win"),
+        "Dear PyGUI state smoke test requires the optional Windows UI dependency",
+    )
+    def test_processing_state_disables_process_and_enables_cancel(self) -> None:
+        try:
+            app = SpriteSheetToolUi()
+
+            app._set_processing(True)
+
+            self.assertFalse(ui_module.dpg.get_item_configuration("process_button")["enabled"])
+            self.assertTrue(ui_module.dpg.get_item_configuration("cancel_button")["enabled"])
+            self.assertEqual(ui_module.dpg.get_value("progress_text"), "Processing...")
+
+            app._set_processing(False)
+
+            self.assertTrue(ui_module.dpg.get_item_configuration("process_button")["enabled"])
+            self.assertFalse(ui_module.dpg.get_item_configuration("cancel_button")["enabled"])
+            self.assertEqual(ui_module.dpg.get_value("progress_text"), "Idle")
+        finally:
+            ui_module.dpg.destroy_context()
+
+    @unittest.skipUnless(
+        ui_module.dpg is not None and sys.platform.startswith("win"),
+        "Dear PyGUI review smoke test requires the optional Windows UI dependency",
+    )
+    def test_empty_review_filter_clears_stale_review_fields(self) -> None:
+        try:
+            app = SpriteSheetToolUi()
+            app.current_project = sample_project()
+            app.refresh_project_rows()
+            self.assertEqual(str(app.review_name.get()), "broken_shelf_01")
+
+            app.review_query.set("not-present")
+            app.refresh_project_rows()
+
+            self.assertEqual(str(app.review_name.get()), "")
+            self.assertEqual(str(app.review_category.get()), "")
+            self.assertEqual(str(app.review_bbox_x.get()), "")
+            self.assertEqual(str(app.review_flags.get()), "")
+        finally:
+            ui_module.dpg.destroy_context()
+
+    @unittest.skipUnless(
+        ui_module.dpg is not None and sys.platform.startswith("win"),
+        "Dear PyGUI message smoke test requires the optional Windows UI dependency",
+    )
+    def test_messages_are_recorded_and_logged_for_feedback(self) -> None:
+        try:
+            app = SpriteSheetToolUi()
+
+            app._show_error("Missing Output", "No output has been generated.")
+
+            self.assertEqual(app.last_message, ("Missing Output", "No output has been generated.", "error"))
+            self.assertIn("Error - Missing Output: No output has been generated.", app.log_lines[-1])
+        finally:
+            ui_module.dpg.destroy_context()
+
     def test_discover_sheet_files_finds_supported_images_and_skips_output_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

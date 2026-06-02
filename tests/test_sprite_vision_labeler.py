@@ -4,10 +4,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from PIL import Image
 
-from tools.sprite_vision_labeler import FixtureVisionProvider, label_project_with_vision
+from tools.sprite_vision_labeler import FixtureVisionProvider, label_project_with_vision, provider_from_name
 
 
 def write_sprite(path: Path) -> None:
@@ -112,6 +113,13 @@ class SpriteVisionLabelerTests(unittest.TestCase):
             self.assertEqual(sprite["category"], "sprites")
             self.assertEqual(sprite["review_status"], "needs_review")
             self.assertIn("vision_low_confidence", sprite["review_flags"])
+
+    def test_gemini_and_nano_banana_provider_aliases_require_google_credentials(self) -> None:
+        with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": ""}, clear=False):
+            for provider in ("gemini", "nano_banana"):
+                with self.subTest(provider=provider):
+                    with self.assertRaisesRegex(RuntimeError, "GEMINI_API_KEY or GOOGLE_API_KEY"):
+                        provider_from_name(provider)
 
 
 if __name__ == "__main__":

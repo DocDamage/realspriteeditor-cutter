@@ -168,6 +168,20 @@ class SpriteMcpServerTests(unittest.TestCase):
             self.assertEqual(result["ok"], True)
             self.assertIn("project.vision_label", read_actions_resource())
             self.assertEqual(load_project_summary(str(project_path))["categories"], {"props_and_items": 1})
+            self.assertEqual(load_project_summary(str(project_path))["vision"], {"labeled": 1, "missing": 0, "low_confidence": 0})
+
+    def test_load_project_summary_reports_missing_required_vision_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_path = root / "project.spritecut.json"
+            project_path.write_text(
+                '{"schema_version": 1, "sprites": [{"id": "sprite_001", "display_name": "unknown", "category": "sprites", "review_status": "approved", "review_flags": []}]}',
+                encoding="utf-8",
+            )
+
+            summary = load_project_summary(str(project_path))
+
+            self.assertEqual(summary["vision"], {"labeled": 0, "missing": 1, "low_confidence": 0})
 
     def test_autotile_generate_writes_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

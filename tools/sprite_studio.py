@@ -89,6 +89,18 @@ def _confidence(sprite: dict[str, Any]) -> float:
         return 0.0
 
 
+def _has_vision_label(sprite: dict[str, Any]) -> bool:
+    label = sprite.get("vision_label")
+    return isinstance(label, dict) and bool(str(label.get("display_name", "")).strip())
+
+
+def _vision_counts(active_sprites: list[dict[str, Any]]) -> dict[str, int]:
+    labeled = sum(1 for sprite in active_sprites if _has_vision_label(sprite))
+    missing = len(active_sprites) - labeled
+    low_confidence = sum(1 for sprite in active_sprites if "vision_low_confidence" in _flags(sprite))
+    return {"labeled": labeled, "missing": missing, "low_confidence": low_confidence}
+
+
 def _status(sprite: dict[str, Any]) -> str:
     return str(sprite.get("review_status", "needs_review"))
 
@@ -143,6 +155,9 @@ def build_review_dashboard(project: dict[str, Any], confidence_threshold: float 
         if severe:
             reasons.extend(severe)
             priority += 12 * len(severe)
+        if not _has_vision_label(sprite):
+            reasons.append("missing_vision_labels")
+            priority += 25
         if display_name in duplicate_names:
             reasons.append("duplicate_display_name")
             priority += 15
@@ -161,6 +176,7 @@ def build_review_dashboard(project: dict[str, Any], confidence_threshold: float 
         "counts": dict(counts),
         "flag_counts": dict(flag_counts),
         "confidence_buckets": dict(confidence_buckets),
+        "vision": _vision_counts(active),
         "duplicate_display_names": sorted(duplicate_names),
         "queue": queue,
     }
@@ -484,6 +500,7 @@ def batch_health_score(project: dict[str, Any], confidence_threshold: float = 0.
     low_confidence = [sprite for sprite in active if _confidence(sprite) < confidence_threshold]
     errors = project.get("errors", [])
     error_count = len(errors) if isinstance(errors, list) else 0
+    vision = _vision_counts(active)
 
     blockers: list[str] = []
     warnings: list[str] = []
@@ -491,6 +508,8 @@ def batch_health_score(project: dict[str, Any], confidence_threshold: float = 0.
         blockers.append("needs_review_sprites")
     if error_count:
         blockers.append("processing_errors")
+    if vision["missing"]:
+        blockers.append("missing_vision_labels")
     if duplicate_names:
         warnings.append("duplicate_display_names")
     if counts.get("rejected", 0):
@@ -504,6 +523,7 @@ def batch_health_score(project: dict[str, Any], confidence_threshold: float = 0.
     score -= counts.get("rejected", 0) * 4
     score -= len(duplicate_names) * 8
     score -= len(low_confidence) * 7
+    score -= vision["missing"] * 5
     score -= severe_flag_count * 3
     score -= error_count * 20
     score = max(0, min(100, score))
@@ -517,6 +537,7 @@ def batch_health_score(project: dict[str, Any], confidence_threshold: float = 0.
         "review_count": counts.get("needs_review", 0),
         "rejected_count": counts.get("rejected", 0),
         "flag_counts": dict(flag_counts),
+        "vision": vision,
         "duplicate_display_names": sorted(duplicate_names),
         "blockers": blockers,
         "warnings": warnings,

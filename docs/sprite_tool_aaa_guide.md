@@ -32,7 +32,8 @@ If a reviewed bbox reaches beyond the source image, `Apply Outputs` clamps it to
 The `Studio` tab is the production control surface:
 
 - `Dashboard` shows a batch health score, status counts, and current review queue size.
-- `Review Queue` prioritizes sprites with `needs_review`, low confidence, severe flags, or duplicate names.
+- `Review Queue` prioritizes sprites with `needs_review`, low confidence, severe flags, duplicate names, or `missing_vision_labels`.
+- `missing_vision_labels` means active sprites still need the required semantic vision pass before handoff.
 - `Asset Browser` searches by name, category, source sheet, status, kind, or review flags.
 - `Auto Name` applies taxonomy rules such as `{category}_{source_sheet}_{index:03d}` to active sprites.
 - `Diff Project` compares the loaded project against another `.spritecut.json` and writes `studio_diff.json`.
@@ -102,6 +103,8 @@ Supported actions:
 
 - `sprite.edit`
 - `sprite.batch_edit`
+- `sprite.save_to_project`
+- `project.vision_label`
 - `palette.extract`
 - `palette.swap`
 - `palette.hue_shift`

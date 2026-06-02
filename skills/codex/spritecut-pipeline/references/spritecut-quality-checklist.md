@@ -14,6 +14,7 @@ Use this checklist before production handoff, large batches, scripted edit runs,
 
 - Inspect `manifest\report.html`, `manifest\manifest.json`, and `project.spritecut.json`.
 - Review every low-confidence crop before handoff.
+- Run `project.vision_label` for semantic object names and categories; `missing_vision_labels` is a handoff blocker for active sprites.
 - Check `needs_review`, `touches_edge`, `tiny_component`, `bbox_clamped`, `manual_split`, and duplicate-name cases.
 - For large folders, use `--workers`, `--max-image-megapixels`, and `--resume` instead of restarting from scratch.
 - Keep atlas and engine export metadata beside the sprites so output can be traced back to the run.
@@ -48,7 +49,7 @@ Use this checklist before production handoff, large batches, scripted edit runs,
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py"
-python -m py_compile tools\cut_tileset_sprites.py tools\sprite_processing.py tools\sprite_atlas.py tools\sprite_manifest.py tools\sprite_reports.py tools\sprite_sheet_tool_ui.py tools\sprite_project.py tools\sprite_studio.py tools\sprite_editor.py tools\autotile_tools.py tools\sprite_ide_api.py tools\golden_sprite_fixtures.py
+python -m py_compile tools\cut_tileset_sprites.py tools\sprite_processing.py tools\sprite_atlas.py tools\sprite_manifest.py tools\sprite_reports.py tools\sprite_sheet_tool_ui.py tools\sprite_project.py tools\sprite_studio.py tools\sprite_editor.py tools\autotile_tools.py tools\sprite_ide_api.py tools\golden_sprite_fixtures.py tools\sprite_mcp_server.py tools\sprite_vision_labeler.py
 python tools\sync_spritecut_skills.py --check
 python tools\sprite_sheet_tool_ui.py --help
 python tools\sprite_ide_api.py --help

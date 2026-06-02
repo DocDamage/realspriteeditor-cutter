@@ -245,6 +245,7 @@ def load_project_summary(project_path: str) -> dict[str, Any]:
     clips = project.get("animation_clips", [])
     statuses: dict[str, int] = {}
     categories: dict[str, int] = {}
+    vision = {"labeled": 0, "missing": 0, "low_confidence": 0}
     if isinstance(sprites, list):
         for sprite in sprites:
             if not isinstance(sprite, dict):
@@ -253,6 +254,16 @@ def load_project_summary(project_path: str) -> dict[str, Any]:
             category = str(sprite.get("category", "sprites"))
             statuses[status] = statuses.get(status, 0) + 1
             categories[category] = categories.get(category, 0) + 1
+            if status == "rejected":
+                continue
+            label = sprite.get("vision_label")
+            if isinstance(label, dict) and str(label.get("display_name", "")).strip():
+                vision["labeled"] += 1
+            else:
+                vision["missing"] += 1
+            flags = sprite.get("review_flags", [])
+            if isinstance(flags, list) and "vision_low_confidence" in [str(flag) for flag in flags]:
+                vision["low_confidence"] += 1
     return {
         "ok": True,
         "project_path": project_path,
@@ -260,6 +271,7 @@ def load_project_summary(project_path: str) -> dict[str, Any]:
         "animation_clip_count": len(clips) if isinstance(clips, list) else 0,
         "statuses": statuses,
         "categories": categories,
+        "vision": vision,
         "settings": project.get("settings", {}),
     }
 

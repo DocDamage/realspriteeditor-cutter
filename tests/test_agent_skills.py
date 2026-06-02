@@ -204,6 +204,7 @@ class AgentSkillPackTests(unittest.TestCase):
             "Do not overwrite source art",
             "manifest\\report.html",
             "low-confidence",
+            "missing_vision_labels",
             "needs_review",
             "palette.extract",
             "autotile.generate",

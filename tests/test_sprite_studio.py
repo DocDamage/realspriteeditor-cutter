@@ -213,6 +213,42 @@ class SpriteStudioTests(unittest.TestCase):
         self.assertIn("needs_review_sprites", health["blockers"])
         self.assertEqual(health["flag_counts"]["touches_edge"], 1)
 
+    def test_batch_health_score_blocks_handoff_until_active_sprites_have_vision_labels(self) -> None:
+        project = sample_project()
+        for sprite in project["sprites"]:
+            if sprite["id"] == "trash_rejected_001":
+                continue
+            sprite["review_status"] = "approved"
+            sprite["review_flags"] = []
+            sprite["confidence"] = 1.0
+            sprite["vision_label"] = {
+                "display_name": sprite["display_name"],
+                "category": sprite["category"],
+                "confidence": 0.95,
+                "provider": "fixture",
+            }
+        del project["sprites"][0]["vision_label"]
+
+        health = batch_health_score(project)
+
+        self.assertIn("missing_vision_labels", health["blockers"])
+        self.assertEqual(health["vision"]["missing"], 1)
+        self.assertEqual(health["vision"]["labeled"], 2)
+
+    def test_review_dashboard_queues_sprites_missing_required_vision_labels(self) -> None:
+        project = sample_project()
+        for sprite in project["sprites"]:
+            if sprite["id"] == "trash_rejected_001":
+                continue
+            sprite["review_status"] = "approved"
+            sprite["review_flags"] = []
+            sprite["confidence"] = 1.0
+
+        dashboard = build_review_dashboard(project)
+
+        self.assertIn("missing_vision_labels", dashboard["queue"][0]["reasons"])
+        self.assertEqual(dashboard["vision"]["missing"], 3)
+
     def test_preset_trainer_uses_project_settings_and_review_corrections(self) -> None:
         preset = train_preset_from_project(sample_project())
 

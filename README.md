@@ -82,7 +82,7 @@ python -m pip install -r requirements-vision.txt
 python tools\sprite_ide_api.py --json "{""action"":""project.vision_label"",""project_path"":""G:\path\_organized_sprites\project.spritecut.json"",""provider"":""openai""}"
 ```
 
-The OpenAI provider requires `OPENAI_API_KEY`, writes `manifest/vision_label_cache.json`, applies confident `display_name` and `category` labels, and leaves uncertain sprites marked for review.
+The OpenAI provider requires `OPENAI_API_KEY`. The Gemini provider, also available as `nano_banana`, requires `GEMINI_API_KEY` or `GOOGLE_API_KEY`. The pass writes `manifest/vision_label_cache.json`, applies confident `display_name` and `category` labels, and leaves uncertain sprites marked for review. Studio health treats missing active-sprite vision labels as the `missing_vision_labels` blocker so batches do not look handoff-ready before the semantic pass runs.
 
 ## SpriteCut MCP Server
 

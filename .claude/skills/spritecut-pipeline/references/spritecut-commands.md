@@ -209,7 +209,7 @@ This writes `applied_project/sprites/edited/<sprite_id>.png`, sets `applied_outp
 
 ### project.vision_label
 
-Use after cutting a project when semantic object names and categories matter. The default `openai` provider requires `OPENAI_API_KEY`; low-confidence labels stay in review.
+Use after cutting a project when semantic object names and categories matter. The default `openai` provider requires `OPENAI_API_KEY`; `gemini` and `nano_banana` require `GEMINI_API_KEY` or `GOOGLE_API_KEY`; low-confidence labels stay in review.
 
 ```json
 {
@@ -228,7 +228,7 @@ Use after cutting a project when semantic object names and categories matter. Th
 }
 ```
 
-For production runs, use `"provider": "openai"` and omit `fixture_labels`. The pass writes `manifest/vision_label_cache.json`, stores each sprite's `vision_label`, applies confident `display_name` and `category` values, and marks uncertain labels with `vision_low_confidence`.
+For production runs, use `"provider": "openai"` or `"provider": "gemini"` and omit `fixture_labels`. The pass writes `manifest/vision_label_cache.json`, stores each sprite's `vision_label`, applies confident `display_name` and `category` values, and marks uncertain labels with `vision_low_confidence`.
 
 ### autotile.generate
 

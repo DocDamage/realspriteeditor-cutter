@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any, Protocol
 
+from PIL import Image
+
 from tools.sprite_project import load_project, safe_file_name, save_project
 
 
@@ -174,12 +176,44 @@ class OpenAIVisionProvider:
         return _normalize_label(json.loads(match.group(0)), self.name)
 
 
+class GeminiVisionProvider:
+    name = "gemini"
+
+    def __init__(self, model: str = "gemini-2.5-flash") -> None:
+        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY or GOOGLE_API_KEY is required for provider='gemini'.")
+        from google import genai
+
+        self.client = genai.Client(api_key=api_key)
+        self.model = model
+
+    def label_sprite(self, image_path: Path, sprite: dict[str, Any]) -> dict[str, Any]:
+        prompt = (
+            "Identify this isolated 2D game sprite. Return only JSON with keys display_name, "
+            "category, description, confidence. Use snake_case display_name. Category must be one of: "
+            f"{', '.join(VISION_CATEGORIES)}. Confidence must be 0 to 1."
+        )
+        with Image.open(image_path) as image:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=[prompt, image.convert("RGBA")],
+            )
+        text = str(getattr(response, "text", "")).strip()
+        match = re.search(r"\{.*\}", text, flags=re.S)
+        if match is None:
+            raise ValueError(f"Gemini vision response did not contain JSON: {text[:200]}")
+        return _normalize_label(json.loads(match.group(0)), self.name)
+
+
 def provider_from_name(name: str, *, fixture_labels: dict[str, dict[str, Any]] | None = None, model: str = "") -> VisionProvider:
     provider_name = name.strip().lower() or "openai"
     if provider_name == "fixture":
         return FixtureVisionProvider(fixture_labels or {})
     if provider_name == "openai":
         return OpenAIVisionProvider(model=model or "gpt-4.1-mini")
+    if provider_name in {"gemini", "nano_banana", "nano-banana"}:
+        return GeminiVisionProvider(model=model or "gemini-2.5-flash")
     raise ValueError(f"Unsupported vision provider: {name}")
 
 

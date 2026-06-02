@@ -149,12 +149,15 @@ class GoldenAndPackagingTests(unittest.TestCase):
 
         self.assertTrue(requirements.exists(), str(requirements))
         self.assertIn("openai", requirements.read_text(encoding="utf-8").lower())
+        self.assertIn("google-genai", requirements.read_text(encoding="utf-8").lower())
 
         text = readme.read_text(encoding="utf-8")
         self.assertIn("project.vision_label", text)
         self.assertIn("requirements-vision.txt", text)
         self.assertIn("OPENAI_API_KEY", text)
+        self.assertIn("GEMINI_API_KEY", text)
         self.assertIn("project_vision_label", text)
+        self.assertIn("missing_vision_labels", text)
 
 
 if __name__ == "__main__":

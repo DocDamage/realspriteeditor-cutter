@@ -390,7 +390,7 @@ class SpriteSheetToolUiTests(unittest.TestCase):
 
         self.assertIn("Health", dashboard)
         self.assertIn("needs_review=1", dashboard)
-        self.assertIn("queue=1", dashboard)
+        self.assertIn("queue=2", dashboard)
         self.assertTrue(queue[0].startswith("sprite_001"))
         self.assertEqual(rows[0]["sprite_id"], "sprite_001")
         self.assertIn("broken_shelf_01", label)

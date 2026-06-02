@@ -360,7 +360,7 @@ def output_targets_from_cli_line(line: str) -> RunOutputTargets | None:
     output_text = line.split("=", 1)[1].strip()
     if not output_text:
         return None
-    output_dir = Path(output_text)
+    output_dir = Path(output_text.replace("\\", "/"))
     return RunOutputTargets(
         output_dir=output_dir,
         report_path=output_dir / "manifest" / "report.html",

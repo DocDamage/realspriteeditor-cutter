@@ -612,7 +612,8 @@ class CutTilesetSpritesTests(unittest.TestCase):
 
             self.assertEqual(first.returncode, 0, first.stderr)
             self.assertEqual(second.returncode, 0, second.stderr)
-            self.assertIn(f"OUTPUT={root / 'out'}", second.stdout)
+            output_line = next(line for line in second.stdout.splitlines() if line.startswith("OUTPUT="))
+            self.assertEqual(Path(output_line.split("=", 1)[1]).resolve(), (root / "out").resolve())
             self.assertFalse((root / "out_2").exists())
             with (root / "out" / "manifest" / "settings.json").open(encoding="utf-8") as handle:
                 settings = json.load(handle)

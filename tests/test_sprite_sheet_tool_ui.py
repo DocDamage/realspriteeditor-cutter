@@ -546,9 +546,9 @@ class SpriteSheetToolUiTests(unittest.TestCase):
             remember_recent_project(state_file, second, limit=3)
             remember_recent_project(state_file, first, limit=3)
 
-            self.assertEqual(load_recent_projects(state_file), [first, second])
+            self.assertEqual(load_recent_projects(state_file), [first.resolve(), second.resolve()])
             second.unlink()
-            self.assertEqual(load_recent_projects(state_file), [first])
+            self.assertEqual(load_recent_projects(state_file), [first.resolve()])
 
     def test_create_ui_sample_pack_writes_golden_fixture_assets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

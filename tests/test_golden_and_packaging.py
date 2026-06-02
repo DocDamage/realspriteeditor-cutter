@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -57,6 +58,25 @@ class GoldenAndPackagingTests(unittest.TestCase):
         self.assertIn("sprite_sheet_tool_ui.py", launcher_text)
         self.assertIn("%*", launcher_text)
         self.assertIn("pause", launcher_text.lower())
+
+    def test_duplicate_ui_entrypoints_delegate_to_canonical_tool_module(self) -> None:
+        root_entrypoint = REPO_ROOT / "sprite_sheet_tool_ui.py"
+        converted_entrypoint = REPO_ROOT / "realspriteeditor-cutter-dearpygui" / "tools" / "sprite_sheet_tool_ui.py"
+
+        for path in [root_entrypoint, converted_entrypoint]:
+            text = path.read_text(encoding="utf-8")
+            self.assertLessEqual(len(text.splitlines()), 40, str(path))
+            self.assertIn("tools.sprite_sheet_tool_ui", text)
+            result = subprocess.run(
+                [sys.executable, str(path), "--help"],
+                cwd=REPO_ROOT,
+                text=True,
+                capture_output=True,
+                timeout=20,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Sprite Sheet Processor UI", result.stdout)
 
     def test_package_script_accepts_absolute_output_dir(self) -> None:
         shell = shutil.which("powershell") or shutil.which("pwsh")

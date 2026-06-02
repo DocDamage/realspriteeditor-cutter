@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import contextlib
+import io
 import json
 import subprocess
 import sys
@@ -10,7 +12,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from tools.cut_tileset_sprites import BUILT_IN_PRESETS, DetectedSprite, discover_sheet_files, infer_auto_defaults, load_config_defaults, load_existing_records, looks_like_animation_sheet
+import tools.cut_tileset_sprites as cutter_module
+from tools.cut_tileset_sprites import BUILT_IN_PRESETS, DetectedSprite, MaxRectsPacker, build_arg_parser, discover_sheet_files, infer_auto_defaults, load_config_defaults, load_existing_records, looks_like_animation_sheet, main, options_from_args, pack_records_into_atlases, process_sheet, write_manifest, write_project_file
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -106,6 +109,66 @@ def detection(label: int, x: int, y: int, width: int, height: int) -> DetectedSp
 
 
 class CutTilesetSpritesTests(unittest.TestCase):
+    def test_cli_parser_and_option_builder_are_exposed_for_refactorable_entrypoints(self) -> None:
+        parser = build_arg_parser({"auto_detect_all": False, "mode": "tileset"})
+        args = parser.parse_args(
+            [
+                "sheet.png",
+                "--animation-fps",
+                "0",
+                "--atlas-size",
+                "8",
+                "--max-image-megapixels",
+                "-4",
+            ]
+        )
+
+        options = options_from_args(args, auto_profile={})
+
+        self.assertEqual(args.mode, "tileset")
+        self.assertFalse(args.auto_detect_all)
+        self.assertEqual(options.animation_fps, 1)
+        self.assertEqual(options.atlas_size, 16)
+        self.assertEqual(options.max_image_megapixels, 0.0)
+
+    def test_main_accepts_explicit_argv_for_cli_smoke_tests(self) -> None:
+        output = io.StringIO()
+
+        with contextlib.redirect_stdout(output):
+            result = main(["--list-presets"])
+
+        self.assertEqual(result, 0)
+        self.assertIn("pixel_tileset_white_bg", output.getvalue())
+
+    def test_report_generation_helpers_live_in_dedicated_module_with_compatibility_imports(self) -> None:
+        from tools import sprite_reports
+
+        self.assertIs(cutter_module.write_html_report, sprite_reports.write_html_report)
+        self.assertIs(cutter_module.write_visual_qa_report, sprite_reports.write_visual_qa_report)
+        self.assertIs(cutter_module.write_visual_regression_report, sprite_reports.write_visual_regression_report)
+        self.assertIs(cutter_module.relative_link, sprite_reports.relative_link)
+        self.assertTrue(callable(sprite_reports.render_main_report_html))
+        self.assertTrue(callable(sprite_reports.render_visual_qa_html))
+
+    def test_manifest_helpers_live_in_dedicated_module_with_compatibility_imports(self) -> None:
+        from tools import sprite_manifest
+
+        self.assertIs(write_manifest, sprite_manifest.write_manifest)
+        self.assertIs(write_project_file, sprite_manifest.write_project_file)
+
+    def test_atlas_helpers_live_in_dedicated_module_with_compatibility_imports(self) -> None:
+        from tools import sprite_atlas
+
+        self.assertIs(pack_records_into_atlases, sprite_atlas.pack_records_into_atlases)
+        self.assertIs(MaxRectsPacker, sprite_atlas.MaxRectsPacker)
+
+    def test_sheet_processing_implementation_lives_in_dedicated_module(self) -> None:
+        from tools import sprite_processing
+
+        self.assertTrue(callable(sprite_processing.process_sheet))
+        self.assertTrue(callable(process_sheet))
+        self.assertTrue(hasattr(sprite_processing, "SheetProcessingHooks"))
+
     def test_infer_auto_defaults_detects_transparent_animation_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

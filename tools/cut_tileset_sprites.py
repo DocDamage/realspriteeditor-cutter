@@ -1,22 +1,28 @@
 from __future__ import annotations
 
 import argparse
-import colorsys
-import csv
-import hashlib
-import html
 import json
 import os
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+
+try:
+    from tools.sprite_atlas import MaxRectsPacker, PackedRect, Rect, pack_records_into_atlases, rect_contains, rects_intersect
+    from tools.sprite_manifest import write_manifest, write_project_file
+    from tools.sprite_reports import relative_link, write_html_report, write_visual_qa_report, write_visual_regression_report
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.sprite_atlas import MaxRectsPacker, PackedRect, Rect, pack_records_into_atlases, rect_contains, rects_intersect
+    from tools.sprite_manifest import write_manifest, write_project_file
+    from tools.sprite_reports import relative_link, write_html_report, write_visual_qa_report, write_visual_regression_report
 
 
 WHITE_THRESHOLD = 250
@@ -170,28 +176,6 @@ class RunOptions:
     resume: bool
     auto_detect_all: bool
     auto_profile: dict[str, object]
-
-
-@dataclass
-class Rect:
-    x: int
-    y: int
-    width: int
-    height: int
-
-    @property
-    def right(self) -> int:
-        return self.x + self.width
-
-    @property
-    def bottom(self) -> int:
-        return self.y + self.height
-
-
-@dataclass
-class PackedRect(Rect):
-    source_id: str
-    rotated: bool = False
 
 
 def natural_key(value: str) -> list[object]:
@@ -809,496 +793,44 @@ def make_contact_sheet(records: list[SpriteRecord], out_path: Path, max_thumb: i
     sheet.convert("RGB").save(out_path)
 
 
-def make_masked_crop(
-    rgba: np.ndarray,
-    foreground: np.ndarray,
-    labels: np.ndarray,
-    detection: DetectedSprite,
-) -> np.ndarray:
-    x0 = detection.x
-    y0 = detection.y
-    x1 = detection.right
-    y1 = detection.bottom
-    crop_rgba = rgba[y0:y1, x0:x1, :].copy()
-    local_mask = labels[y0:y1, x0:x1] == detection.label
-    local_foreground = foreground[y0:y1, x0:x1] & local_mask
-    refined = cv2.morphologyEx(local_foreground.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8), iterations=1)
-    crop_rgba[:, :, 3] = (refined * 255).astype(np.uint8)
-    return crop_rgba
+from tools.sprite_processing import SheetProcessingHooks, draw_detection_box, make_masked_crop, place_animation_frame
+from tools.sprite_processing import process_animation_sheet as _process_animation_sheet
+from tools.sprite_processing import process_sheet as _process_sheet
+from tools.sprite_processing import process_tileset_sheet as _process_tileset_sheet
 
 
-def draw_detection_box(
-    draw: ImageDraw.ImageDraw,
-    detection: DetectedSprite,
-    label: str,
-    color: tuple[int, int, int],
-    font: ImageFont.ImageFont,
-) -> None:
-    x0 = detection.x
-    y0 = detection.y
-    x1 = detection.right
-    y1 = detection.bottom
-    draw.rectangle((x0, y0, x1 - 1, y1 - 1), outline=color, width=1)
-    draw.text((x0 + 2, y0 + 2), label, fill=color, font=font)
+def _sheet_processing_hooks() -> SheetProcessingHooks:
+    return SheetProcessingHooks(
+        sprite_record_cls=SpriteRecord,
+        safe_name=safe_name,
+        detect_background=detect_background,
+        grouped_components=grouped_components,
+        extract_detections=extract_detections,
+        resolve_sheet_mode=resolve_sheet_mode,
+        classify_sprite=classify_sprite,
+        should_use_full_alpha=should_use_full_alpha,
+        analyze_sprite_pixels=analyze_sprite_pixels,
+        detect_pivot=detect_pivot,
+        assess_sprite_quality=assess_sprite_quality,
+        save_pivot_debug=save_pivot_debug,
+        is_partial_detection=is_partial_detection,
+        make_contact_sheet=make_contact_sheet,
+        cluster_animation_rows=cluster_animation_rows,
+    )
 
 
-def process_tileset_sheet(
-    source_path: Path,
-    source_label: str,
-    source_stem: str,
-    rgba: np.ndarray,
-    rgba_image: Image.Image,
-    foreground: np.ndarray,
-    labels: np.ndarray,
-    detections: list[DetectedSprite],
-    out_dir: Path,
-    preview_dir: Path,
-    sheet_mode: str,
-    options: RunOptions,
-) -> list[SpriteRecord]:
-    records: list[SpriteRecord] = []
-    counters: Counter[str] = Counter()
-    boxed = rgba_image.convert("RGB")
-    draw = ImageDraw.Draw(boxed)
-    font = ImageFont.load_default()
-    colors = [
-        (230, 80, 80),
-        (40, 150, 220),
-        (80, 170, 80),
-        (220, 150, 40),
-        (170, 90, 220),
-        (60, 180, 180),
-    ]
-
-    for detection in detections:
-        category = classify_sprite(source_stem, detection.x, detection.y, detection.width, detection.height, detection.foreground_pixels)
-        counters[category] += 1
-        sprite_id = f"{source_label}_{category}_{counters[category]:03d}"
-        file_name = f"{sprite_id}.png"
-        category_dir = out_dir / "sprites" / category
-        category_dir.mkdir(parents=True, exist_ok=True)
-        output_path = category_dir / file_name
-
-        crop_rgba = rgba[detection.y : detection.bottom, detection.x : detection.right, :].copy()
-        use_full_alpha = should_use_full_alpha(category, detection.width, detection.height, detection.foreground_pixels)
-        if use_full_alpha:
-            crop_rgba[:, :, 3] = 255
-            alpha_mode = "full_bbox"
-        else:
-            crop_rgba = make_masked_crop(rgba, foreground, labels, detection)
-            alpha_mode = "background_removed"
-
-        Image.fromarray(crop_rgba, "RGBA").save(output_path)
-        transparency_ratio, aspect_ratio, colors = analyze_sprite_pixels(crop_rgba)
-        pivot = detect_pivot(crop_rgba, category)
-        confidence, review_flags, review_status = assess_sprite_quality(
-            detection,
-            rgba.shape[1],
-            rgba.shape[0],
-            transparency_ratio,
-            aspect_ratio,
-        )
-        if options.pivot_debug:
-            save_pivot_debug(crop_rgba, pivot, preview_dir / "pivots" / f"{sprite_id}_pivot.png")
-
-        record = SpriteRecord(
-            id=sprite_id,
-            display_name=sprite_id,
-            source_sheet=source_label,
-            source_file=str(source_path),
-            kind="sprite",
-            sheet_mode=sheet_mode,
-            category=category,
-            sequence=None,
-            frame=None,
-            output_file=str(output_path),
-            bbox={"x": detection.x, "y": detection.y, "width": detection.width, "height": detection.height},
-            width=detection.width,
-            height=detection.height,
-            slot_width=None,
-            slot_height=None,
-            foreground_pixels=detection.foreground_pixels,
-            alpha_mode=alpha_mode,
-            is_partial=is_partial_detection(detection, rgba.shape[1], rgba.shape[0]),
-            transparency_ratio=transparency_ratio,
-            aspect_ratio=aspect_ratio,
-            dominant_colors=colors,
-            pivot=pivot,
-            confidence=confidence,
-            review_flags=review_flags,
-            review_status=review_status,
-            atlas=None,
-        )
-        records.append(record)
-
-        color = colors[(len(records) - 1) % len(colors)]
-        draw_detection_box(draw, detection, str(len(records)), color, font)
-
-    boxed.save(preview_dir / f"{source_label}_boxes.png")
-    make_contact_sheet(records, preview_dir / f"{source_label}_contact.png")
-    return records
+def process_tileset_sheet(*args: object, **kwargs: object) -> list[SpriteRecord]:
+    kwargs.setdefault("hooks", _sheet_processing_hooks())
+    return _process_tileset_sheet(*args, **kwargs)  # type: ignore[return-value]
 
 
-def place_animation_frame(crop_rgba: np.ndarray, slot_width: int, slot_height: int, anchor: str) -> np.ndarray:
-    if crop_rgba.shape[1] == slot_width and crop_rgba.shape[0] == slot_height:
-        return crop_rgba
-
-    frame = np.zeros((slot_height, slot_width, 4), dtype=np.uint8)
-    if anchor == "center":
-        dest_x = (slot_width - crop_rgba.shape[1]) // 2
-        dest_y = (slot_height - crop_rgba.shape[0]) // 2
-    else:
-        dest_x = (slot_width - crop_rgba.shape[1]) // 2
-        dest_y = slot_height - crop_rgba.shape[0]
-
-    dest_x = max(0, dest_x)
-    dest_y = max(0, dest_y)
-    frame[dest_y : dest_y + crop_rgba.shape[0], dest_x : dest_x + crop_rgba.shape[1], :] = crop_rgba
-    return frame
-
-
-def process_animation_sheet(
-    source_path: Path,
-    source_label: str,
-    rgba: np.ndarray,
-    rgba_image: Image.Image,
-    foreground: np.ndarray,
-    labels: np.ndarray,
-    detections: list[DetectedSprite],
-    out_dir: Path,
-    preview_dir: Path,
-    sheet_mode: str,
-    options: RunOptions,
-) -> list[SpriteRecord]:
-    rows = cluster_animation_rows(detections)
-    if options.mode == "auto":
-        rows = [row for row in rows if len(row) >= options.animation_min_frames]
-    rows = [row for row in rows if row]
-
-    records: list[SpriteRecord] = []
-    boxed = rgba_image.convert("RGB")
-    draw = ImageDraw.Draw(boxed)
-    font = ImageFont.load_default()
-    colors = [
-        (230, 80, 80),
-        (40, 150, 220),
-        (80, 170, 80),
-        (220, 150, 40),
-        (170, 90, 220),
-        (60, 180, 180),
-    ]
-
-    for row_index, row in enumerate(rows, start=1):
-        sequence_name = options.animation_names[row_index - 1] if row_index <= len(options.animation_names) else f"row_{row_index:02d}"
-        sequence_dir = out_dir / "animations" / source_label / sequence_name
-        sequence_dir.mkdir(parents=True, exist_ok=True)
-        slot_width = max(item.width for item in row)
-        slot_height = max(item.height for item in row)
-
-        sequence_records: list[SpriteRecord] = []
-        for frame_index, detection in enumerate(row, start=1):
-            frame_name = f"{sequence_name}_{frame_index:03d}"
-            output_path = sequence_dir / f"{frame_name}.png"
-            crop_rgba = make_masked_crop(rgba, foreground, labels, detection)
-            if options.animation_frame_mode == "fixed":
-                output_rgba = place_animation_frame(crop_rgba, slot_width, slot_height, options.animation_anchor)
-                alpha_mode = f"animation_fixed_{options.animation_anchor}"
-                output_width = slot_width
-                output_height = slot_height
-                output_slot_width: int | None = slot_width
-                output_slot_height: int | None = slot_height
-            else:
-                output_rgba = crop_rgba
-                alpha_mode = "background_removed"
-                output_width = detection.width
-                output_height = detection.height
-                output_slot_width = None
-                output_slot_height = None
-
-            Image.fromarray(output_rgba, "RGBA").save(output_path)
-            transparency_ratio, aspect_ratio, colors = analyze_sprite_pixels(output_rgba)
-            pivot = detect_pivot(output_rgba, "animation")
-            confidence, review_flags, review_status = assess_sprite_quality(
-                detection,
-                rgba.shape[1],
-                rgba.shape[0],
-                transparency_ratio,
-                aspect_ratio,
-            )
-            if options.pivot_debug:
-                save_pivot_debug(output_rgba, pivot, preview_dir / "pivots" / f"{source_label}_{frame_name}_pivot.png")
-
-            record = SpriteRecord(
-                id=frame_name,
-                display_name=frame_name,
-                source_sheet=source_label,
-                source_file=str(source_path),
-                kind="animation_frame",
-                sheet_mode=sheet_mode,
-                category="animation",
-                sequence=sequence_name,
-                frame=frame_index,
-                output_file=str(output_path),
-                bbox={"x": detection.x, "y": detection.y, "width": detection.width, "height": detection.height},
-                width=output_width,
-                height=output_height,
-                slot_width=output_slot_width,
-                slot_height=output_slot_height,
-                foreground_pixels=detection.foreground_pixels,
-                alpha_mode=alpha_mode,
-                is_partial=is_partial_detection(detection, rgba.shape[1], rgba.shape[0]),
-                transparency_ratio=transparency_ratio,
-                aspect_ratio=aspect_ratio,
-                dominant_colors=colors,
-                pivot=pivot,
-                confidence=confidence,
-                review_flags=review_flags,
-                review_status=review_status,
-                atlas=None,
-            )
-            records.append(record)
-            sequence_records.append(record)
-
-            color = colors[(row_index - 1) % len(colors)]
-            draw_detection_box(draw, detection, f"{row_index}.{frame_index}", color, font)
-
-        make_contact_sheet(sequence_records, preview_dir / f"{source_label}_{sequence_name}_contact.png")
-
-    boxed.save(preview_dir / f"{source_label}_boxes.png")
-    make_contact_sheet(records, preview_dir / f"{source_label}_contact.png")
-    return records
+def process_animation_sheet(*args: object, **kwargs: object) -> list[SpriteRecord]:
+    kwargs.setdefault("hooks", _sheet_processing_hooks())
+    return _process_animation_sheet(*args, **kwargs)  # type: ignore[return-value]
 
 
 def process_sheet(source_path: Path, out_dir: Path, preview_dir: Path, options: RunOptions) -> list[SpriteRecord]:
-    source_stem = safe_name(source_path.stem)
-    source_label = f"sheet_{source_stem.zfill(2) if source_stem.isdigit() else source_stem}"
-    source_image = Image.open(source_path)
-    megapixels = (source_image.width * source_image.height) / 1_000_000
-    if options.max_image_megapixels > 0 and megapixels > options.max_image_megapixels:
-        source_image.close()
-        raise ValueError(f"{source_path} is {megapixels:.3f} megapixels and exceeds max_image_megapixels={options.max_image_megapixels}")
-    rgba_image = source_image.convert("RGBA")
-    source_image.close()
-    rgba = np.array(rgba_image)
-    rgb = rgba[:, :, :3]
-    alpha = rgba[:, :, 3]
-
-    background = detect_background(rgb, alpha, options.detection_settings)
-    foreground = ~background
-    labels, stats, num = grouped_components(foreground)
-    detections = extract_detections(foreground, labels, stats, num, options.detection_settings)
-    resolved_mode = resolve_sheet_mode(options.mode, detections, options.animation_min_frames)
-
-    if resolved_mode == "animation":
-        records = process_animation_sheet(
-            source_path,
-            source_label,
-            rgba,
-            rgba_image,
-            foreground,
-            labels,
-            detections,
-            out_dir,
-            preview_dir,
-            resolved_mode,
-            options,
-        )
-    else:
-        records = process_tileset_sheet(
-            source_path,
-            source_label,
-            source_stem,
-            rgba,
-            rgba_image,
-            foreground,
-            labels,
-            detections,
-            out_dir,
-            preview_dir,
-            resolved_mode,
-            options,
-        )
-
-    rgba_image.close()
-    return records
-
-
-def rects_intersect(a: Rect, b: Rect) -> bool:
-    return a.x < b.right and a.right > b.x and a.y < b.bottom and a.bottom > b.y
-
-
-def rect_contains(a: Rect, b: Rect) -> bool:
-    return b.x >= a.x and b.y >= a.y and b.right <= a.right and b.bottom <= a.bottom
-
-
-class MaxRectsPacker:
-    def __init__(self, width: int, height: int, padding: int = 2, allow_rotation: bool = False) -> None:
-        self.width = width
-        self.height = height
-        self.padding = max(0, padding)
-        self.allow_rotation = allow_rotation
-        self.free_rects = [Rect(0, 0, width, height)]
-        self.used_rects: list[Rect] = []
-
-    def insert(self, source_id: str, width: int, height: int) -> PackedRect | None:
-        candidates = [(width, height, False)]
-        if self.allow_rotation and width != height:
-            candidates.append((height, width, True))
-
-        best_free: Rect | None = None
-        best_size: tuple[int, int, bool] | None = None
-        best_score: tuple[int, int] | None = None
-        for candidate_width, candidate_height, rotated in candidates:
-            packed_width = candidate_width + self.padding * 2
-            packed_height = candidate_height + self.padding * 2
-            for free in self.free_rects:
-                if packed_width > free.width or packed_height > free.height:
-                    continue
-                leftover_width = free.width - packed_width
-                leftover_height = free.height - packed_height
-                score = (min(leftover_width, leftover_height), max(leftover_width, leftover_height))
-                if best_score is None or score < best_score:
-                    best_score = score
-                    best_free = free
-                    best_size = (candidate_width, candidate_height, rotated)
-
-        if best_free is None or best_size is None:
-            return None
-
-        placed = PackedRect(
-            x=best_free.x + self.padding,
-            y=best_free.y + self.padding,
-            width=best_size[0],
-            height=best_size[1],
-            source_id=source_id,
-            rotated=best_size[2],
-        )
-        used_with_padding = Rect(best_free.x, best_free.y, placed.width + self.padding * 2, placed.height + self.padding * 2)
-        self._split_free_rects(used_with_padding)
-        self._prune_free_rects()
-        self.used_rects.append(used_with_padding)
-        return placed
-
-    def _split_free_rects(self, used: Rect) -> None:
-        next_free: list[Rect] = []
-        for free in self.free_rects:
-            if not rects_intersect(free, used):
-                next_free.append(free)
-                continue
-
-            if used.x > free.x:
-                next_free.append(Rect(free.x, free.y, used.x - free.x, free.height))
-            if used.right < free.right:
-                next_free.append(Rect(used.right, free.y, free.right - used.right, free.height))
-            if used.y > free.y:
-                next_free.append(Rect(free.x, free.y, free.width, used.y - free.y))
-            if used.bottom < free.bottom:
-                next_free.append(Rect(free.x, used.bottom, free.width, free.bottom - used.bottom))
-
-        self.free_rects = [rect for rect in next_free if rect.width > 0 and rect.height > 0]
-
-    def _prune_free_rects(self) -> None:
-        pruned: list[Rect] = []
-        for index, rect in enumerate(self.free_rects):
-            contained = False
-            for other_index, other in enumerate(self.free_rects):
-                if index != other_index and rect_contains(other, rect):
-                    contained = True
-                    break
-            if not contained:
-                pruned.append(rect)
-        self.free_rects = pruned
-
-
-def pack_records_into_atlases(records: list[SpriteRecord], out_dir: Path, options: RunOptions) -> list[dict[str, object]]:
-    atlas_dir = out_dir / "atlases"
-    atlas_dir.mkdir(parents=True, exist_ok=True)
-    groups: dict[str, list[SpriteRecord]] = {}
-    for record in records:
-        groups.setdefault(record.category, []).append(record)
-
-    atlas_summaries: list[dict[str, object]] = []
-    for group_name, group_records in sorted(groups.items()):
-        pending = sorted(group_records, key=lambda record: max(record.width, record.height), reverse=True)
-        atlas_index = 1
-        while pending:
-            largest_width = max(record.width for record in pending) + options.atlas_padding * 2
-            largest_height = max(record.height for record in pending) + options.atlas_padding * 2
-            atlas_size = max(options.atlas_size, largest_width, largest_height)
-            packer = MaxRectsPacker(atlas_size, atlas_size, options.atlas_padding, options.atlas_allow_rotation)
-            placements: list[tuple[SpriteRecord, PackedRect]] = []
-            still_pending: list[SpriteRecord] = []
-
-            for record in pending:
-                placed = packer.insert(record.id, record.width, record.height)
-                if placed is None:
-                    still_pending.append(record)
-                else:
-                    placements.append((record, placed))
-
-            if not placements:
-                raise SystemExit(f"Could not pack sprites in group {group_name}; atlas size is too small.")
-
-            safe_group = safe_name(group_name) or "sprites"
-            atlas_name = f"{safe_group}_atlas_{atlas_index:03d}"
-            atlas_path = atlas_dir / f"{atlas_name}.png"
-            atlas_json_path = atlas_dir / f"{atlas_name}.json"
-            atlas_image = Image.new("RGBA", (atlas_size, atlas_size), (255, 255, 255, 0))
-            frames: list[dict[str, object]] = []
-
-            for record, placed in placements:
-                sprite = Image.open(record.output_file).convert("RGBA")
-                if placed.rotated:
-                    sprite = sprite.rotate(90, expand=True)
-                atlas_image.alpha_composite(sprite, (placed.x, placed.y))
-                sprite.close()
-
-                rect = {"x": placed.x, "y": placed.y, "width": placed.width, "height": placed.height}
-                record.atlas = {
-                    "atlas": atlas_path.name,
-                    "atlas_file": str(atlas_path),
-                    "group": group_name,
-                    "rect": rect,
-                    "rotated": placed.rotated,
-                }
-                frames.append(
-                    {
-                        "atlas": atlas_path.name,
-                        "group": group_name,
-                        "source_id": record.id,
-                        "source_file": record.output_file,
-                        "category": record.category,
-                        "sequence": record.sequence,
-                        "frame": record.frame,
-                        "rect": rect,
-                        "rotated": placed.rotated,
-                        "pivot": record.pivot,
-                        "is_partial": record.is_partial,
-                    }
-                )
-
-            atlas_image.save(atlas_path)
-            atlas_data = {
-                "atlas": atlas_path.name,
-                "atlas_file": str(atlas_path),
-                "group": group_name,
-                "width": atlas_size,
-                "height": atlas_size,
-                "padding": options.atlas_padding,
-                "frames": frames,
-            }
-            with atlas_json_path.open("w", encoding="utf-8") as handle:
-                json.dump(atlas_data, handle, indent=2)
-            atlas_summaries.append(atlas_data)
-
-            pending = still_pending
-            atlas_index += 1
-
-    manifest_dir = out_dir / "manifest"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    with (manifest_dir / "atlases.json").open("w", encoding="utf-8") as handle:
-        json.dump({"atlases": atlas_summaries}, handle, indent=2)
-    return atlas_summaries
+    return _process_sheet(source_path, out_dir, preview_dir, options, _sheet_processing_hooks())  # type: ignore[return-value]
 
 
 def sprite_export_entry(record: SpriteRecord) -> dict[str, object]:
@@ -1482,671 +1014,26 @@ def write_engine_exports(records: list[SpriteRecord], out_dir: Path, engines: li
                 indent=2,
             )
 
-
-def relative_link(from_dir: Path, target: Path) -> str:
-    return Path(os.path.relpath(Path(target).resolve(), start=from_dir.resolve())).as_posix()
-
-
-def write_html_report(
-    records: list[SpriteRecord],
-    manifest_dir: Path,
-    sheets_processed: int,
-    sheet_errors: list[SheetError],
-    animation_clips: list[dict[str, object]] | None = None,
-) -> None:
-    category_counts = Counter(record.category for record in records)
-    kind_counts = Counter(record.kind for record in records)
-    sheet_counts = Counter(record.source_sheet for record in records)
-    flag_counts = Counter(flag for record in records for flag in record.review_flags)
-    partial_count = sum(1 for record in records if record.is_partial)
-    needs_review_count = sum(1 for record in records if record.review_status == "needs_review")
-    atlased_count = sum(1 for record in records if record.atlas)
-    atlas_names = sorted({str(record.atlas["atlas"]) for record in records if record.atlas})
-    sample_records = records[:80]
-
-    rows = []
-    thumb_cards = []
-    clip_cards = []
-    for clip in animation_clips or []:
-        frames_html = []
-        frames = clip.get("frames", [])
-        if isinstance(frames, list):
-            for frame in frames:
-                if not isinstance(frame, dict):
-                    continue
-                source_file = frame.get("source_file")
-                if not source_file:
-                    continue
-                frame_link = html.escape(relative_link(manifest_dir, Path(str(source_file))))
-                frames_html.append(
-                    "<a class=\"clip-frame\" href=\"{href}\">"
-                    "<img src=\"{href}\" loading=\"lazy\" alt=\"{alt}\">"
-                    "<span>{label}</span>"
-                    "</a>".format(
-                        href=frame_link,
-                        alt=html.escape(str(frame.get("sprite", "frame"))),
-                        label=html.escape(str(frame.get("frame", frame.get("sprite", "")))),
-                    )
-                )
-        clip_cards.append(
-            "<section class=\"card clip-card\" data-clip=\"{clip_name}\">"
-            "<h3>{clip_name}</h3>"
-            "<p>{frame_count} frames | {frame_rate} fps | loop={loop}</p>"
-            "<div class=\"clip-strip\">{frames}</div>"
-            "</section>".format(
-                clip_name=html.escape(str(clip.get("name", "clip"))),
-                frame_count=html.escape(str(clip.get("frame_count", 0))),
-                frame_rate=html.escape(str(clip.get("frame_rate", ""))),
-                loop=html.escape(str(clip.get("loop", ""))),
-                frames="".join(frames_html),
-            )
-        )
-    for record in records:
-        preview_link = html.escape(relative_link(manifest_dir, Path(record.output_file)))
-        safe_id = html.escape(record.id)
-        safe_category = html.escape(record.category)
-        safe_flags = html.escape(" ".join(record.review_flags))
-        safe_status = html.escape(record.review_status)
-        atlas_name = html.escape(str(record.atlas.get("atlas", ""))) if record.atlas else ""
-        thumb_cards.append(
-            "<a class=\"thumb-card\" href=\"{href}\" data-status=\"{status}\" data-flags=\"{flags}\" data-category=\"{category}\">"
-            "<span class=\"thumb-frame\"><img src=\"{href}\" loading=\"lazy\" alt=\"{alt}\"></span>"
-            "<span class=\"thumb-name\">{name}</span>"
-            "<span class=\"thumb-meta\">{category} | {width}x{height} | {status}</span>"
-            "</a>".format(
-                href=preview_link,
-                alt=safe_id,
-                name=html.escape(record.display_name),
-                category=safe_category,
-                flags=safe_flags,
-                width=record.width,
-                height=record.height,
-                status=safe_status,
-            )
-        )
-
-    for record in sample_records:
-        preview_link = html.escape(relative_link(manifest_dir, Path(record.output_file)))
-        safe_category = html.escape(record.category)
-        atlas_name = html.escape(str(record.atlas.get("atlas", ""))) if record.atlas else ""
-        rows.append(
-            "<tr>"
-            f"<td><a href=\"{preview_link}\">{html.escape(record.display_name)}</a></td>"
-            f"<td>{safe_category}</td>"
-            f"<td>{html.escape(record.kind)}</td>"
-            f"<td>{record.width}x{record.height}</td>"
-            f"<td>{html.escape(str(record.is_partial))}</td>"
-            f"<td>{record.confidence:.3f}</td>"
-            f"<td>{html.escape(', '.join(record.review_flags) or 'none')}</td>"
-            f"<td>{html.escape(str(record.pivot.get('x', '')))}, {html.escape(str(record.pivot.get('y', '')))}</td>"
-            f"<td>{atlas_name}</td>"
-            "</tr>"
-        )
-
-    category_items = "".join(f"<li>{html.escape(name)}: {count}</li>" for name, count in sorted(category_counts.items()))
-    kind_items = "".join(f"<li>{html.escape(name)}: {count}</li>" for name, count in sorted(kind_counts.items()))
-    sheet_items = "".join(f"<li>{html.escape(name)}: {count}</li>" for name, count in sorted(sheet_counts.items()))
-    flag_items = "".join(f"<li>{html.escape(name)}: {count}</li>" for name, count in sorted(flag_counts.items())) or "<li>None</li>"
-    atlas_items = "".join(f"<li>{html.escape(name)}</li>" for name in atlas_names) or "<li>None</li>"
-    error_items = (
-        "".join(f"<li>{html.escape(Path(error.source_file).name)}: {html.escape(error.error)}</li>" for error in sheet_errors)
-        or "<li>None</li>"
-    )
-
-    report = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Sprite Sheet Processing Report</title>
-  <style>
-    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 24px; background: #15171c; color: #e8ebf2; }}
-    a {{ color: #80b7ff; }}
-    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }}
-    .card {{ background: #20242b; border: 1px solid #343a46; border-radius: 6px; padding: 14px; }}
-    .filters {{ display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0; }}
-    .filters input, .filters select {{ background: #111318; color: #e8ebf2; border: 1px solid #343a46; border-radius: 4px; padding: 7px; }}
-    .thumb-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }}
-    .thumb-card {{ display: grid; gap: 7px; color: #e8ebf2; text-decoration: none; background: #20242b; border: 1px solid #343a46; border-radius: 6px; padding: 10px; min-width: 0; }}
-    .thumb-card:hover {{ border-color: #80b7ff; }}
-    .thumb-card.hidden {{ display: none; }}
-    .thumb-frame {{ display: grid; place-items: center; height: 96px; border-radius: 4px; background-color: #2a2f39; background-image: linear-gradient(45deg, #39404c 25%, transparent 25%), linear-gradient(-45deg, #39404c 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #39404c 75%), linear-gradient(-45deg, transparent 75%, #39404c 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }}
-    .thumb-frame img {{ max-width: 96%; max-height: 90px; image-rendering: pixelated; }}
-    .thumb-name {{ overflow-wrap: anywhere; font-size: 12px; }}
-    .thumb-meta {{ color: #aeb8cc; font-size: 12px; }}
-    .clip-strip {{ display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }}
-    .clip-frame {{ display: grid; gap: 4px; min-width: 72px; color: #e8ebf2; text-decoration: none; text-align: center; font-size: 12px; }}
-    .clip-frame img {{ max-width: 72px; max-height: 72px; image-rendering: pixelated; background: #2a2f39; border-radius: 4px; padding: 4px; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 16px; }}
-    th, td {{ border-bottom: 1px solid #343a46; padding: 8px; text-align: left; font-size: 13px; }}
-    th {{ color: #aeb8cc; }}
-    ul {{ margin: 8px 0 0; padding-left: 20px; }}
-  </style>
-</head>
-<body>
-  <h1>Sprite Sheet Processing Report</h1>
-  <div class="grid">
-    <section class="card">
-      <h2>Run Summary</h2>
-      <p>total_sprites: {len(records)}</p>
-      <p>sheets_processed: {sheets_processed}</p>
-      <p>sheets_failed: {len(sheet_errors)}</p>
-      <p>partial_sprites: {partial_count}</p>
-      <p>needs_review: {needs_review_count}</p>
-      <p>atlased_sprites: {atlased_count}</p>
-      <p>atlases: {len(atlas_names)}</p>
-      <p><a href="../project.spritecut.json">project.spritecut.json</a></p>
-      <p><a href="settings.json">settings.json</a></p>
-      <p><a href="visual_qa.html">visual_qa.html</a></p>
-    </section>
-    <section class="card"><h2>By Kind</h2><ul>{kind_items}</ul></section>
-    <section class="card"><h2>By Category</h2><ul>{category_items}</ul></section>
-    <section class="card"><h2>By Sheet</h2><ul>{sheet_items}</ul></section>
-    <section class="card"><h2>Review Flags</h2><ul>{flag_items}</ul></section>
-    <section class="card"><h2>Atlases</h2><ul>{atlas_items}</ul></section>
-    <section class="card"><h2>Errors</h2><ul>{error_items}</ul></section>
-  </div>
-  <h2>Sprite Preview</h2>
-  <section class="filters" aria-label="Review Filters">
-    <strong>Review Filters</strong>
-    <select id="statusFilter" onchange="filterSprites()">
-      <option value="all">All statuses</option>
-      <option value="needs_review">Needs review</option>
-      <option value="approved">Approved</option>
-    </select>
-    <input id="flagFilter" type="search" placeholder="flag or category" oninput="filterSprites()">
-  </section>
-  <div class="thumb-grid">
-    {''.join(thumb_cards)}
-  </div>
-  <h2>Animation Clips</h2>
-  <div class="grid">
-    {''.join(clip_cards) or '<section class="card"><p>No animation clips.</p></section>'}
-  </div>
-  <h2>Sample Records</h2>
-  <table>
-    <thead><tr><th>Name</th><th>Category</th><th>Kind</th><th>Size</th><th>Partial</th><th>Confidence</th><th>Flags</th><th>Pivot</th><th>Atlas</th></tr></thead>
-    <tbody>
-      {''.join(rows)}
-    </tbody>
-  </table>
-  <script>
-    function filterSprites() {{
-      const status = document.getElementById("statusFilter").value;
-      const query = document.getElementById("flagFilter").value.trim().toLowerCase();
-      for (const card of document.querySelectorAll(".thumb-card")) {{
-        const statusOk = status === "all" || card.dataset.status === status;
-        const haystack = `${{card.dataset.flags}} ${{card.dataset.category}} ${{card.textContent}}`.toLowerCase();
-        const queryOk = !query || haystack.includes(query);
-        card.classList.toggle("hidden", !(statusOk && queryOk));
-      }}
-    }}
-  </script>
-</body>
-</html>
-"""
-    (manifest_dir / "report.html").write_text(report, encoding="utf-8")
+def build_pre_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--config", type=Path, help="JSON config file containing default CLI options.")
+    parser.add_argument("--preset", choices=sorted(BUILT_IN_PRESETS), help="Built-in preset to use before optional --config overrides.")
+    parser.add_argument("--list-presets", action="store_true", help="Print built-in preset names and exit.")
+    return parser
 
 
-def write_visual_regression_report(out_dir: Path, manifest_dir: Path) -> None:
-    preview_dir = out_dir / "previews"
-    artifacts: list[dict[str, object]] = []
-    if preview_dir.exists():
-        for path in sorted(preview_dir.rglob("*.png"), key=lambda item: item.as_posix().lower()):
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            artifacts.append(
-                {
-                    "file": relative_link(manifest_dir, path),
-                    "sha256": digest,
-                    "bytes": path.stat().st_size,
-                }
-            )
-    with (manifest_dir / "visual_regression.json").open("w", encoding="utf-8") as handle:
-        json.dump({"preview_artifacts": artifacts}, handle, indent=2)
-
-
-def _safe_open_sprite(path: str) -> Image.Image | None:
-    try:
-        with Image.open(path) as image:
-            return image.convert("RGBA").copy()
-    except Exception:
-        return None
-
-
-def _hue_shift_preview(image: Image.Image, degrees: float) -> Image.Image:
-    rgba = image.convert("RGBA")
-    data = np.array(rgba, dtype=np.uint8)
-    alpha = data[:, :, 3]
-    height, width = alpha.shape
-    shift = (degrees % 360.0) / 360.0
-    for y in range(height):
-        for x in range(width):
-            if alpha[y, x] == 0:
-                continue
-            r, g, b = data[y, x, :3] / 255.0
-            h, s, v = colorsys.rgb_to_hsv(float(r), float(g), float(b))
-            nr, ng, nb = colorsys.hsv_to_rgb((h + shift) % 1.0, s, v)
-            data[y, x, 0] = int(round(nr * 255))
-            data[y, x, 1] = int(round(ng * 255))
-            data[y, x, 2] = int(round(nb * 255))
-    return Image.fromarray(data, "RGBA")
-
-
-def _parse_hex_color(value: str) -> tuple[int, int, int]:
-    value = value.strip().lstrip("#")
-    if len(value) != 6:
-        return (0, 0, 0)
-    return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
-
-
-def _draw_label(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str) -> None:
-    draw.text(xy, text, fill=(32, 34, 40), font=ImageFont.load_default())
-
-
-def _write_palette_change_sample(record: SpriteRecord, out_path: Path) -> bool:
-    source = _safe_open_sprite(record.output_file)
-    if source is None:
-        return False
-    variants = [
-        ("original", source),
-        ("hue +90", _hue_shift_preview(source, 90)),
-        ("hue +180", _hue_shift_preview(source, 180)),
-    ]
-    max_thumb = 72
-    label_height = 18
-    swatch_height = 20
-    cell_w = max_thumb + 18
-    cell_h = max_thumb + label_height + swatch_height + 18
-    sheet = Image.new("RGBA", (cell_w * len(variants), cell_h), (248, 248, 248, 255))
-    draw = ImageDraw.Draw(sheet)
-    for index, (label, image) in enumerate(variants):
-        thumb = image.copy()
-        thumb.thumbnail((max_thumb, max_thumb), Image.Resampling.NEAREST)
-        x = index * cell_w
-        checker = render_checker((max_thumb, max_thumb))
-        sheet.alpha_composite(checker, (x + 9, 8))
-        sheet.alpha_composite(thumb, (x + 9 + (max_thumb - thumb.width) // 2, 8 + (max_thumb - thumb.height) // 2))
-        _draw_label(draw, (x + 8, max_thumb + 12), label)
-        for color_index, color in enumerate(record.dominant_colors[:4]):
-            sx = x + 8 + color_index * 16
-            sy = max_thumb + label_height + 13
-            draw.rectangle((sx, sy, sx + 12, sy + 12), fill=_parse_hex_color(color), outline=(48, 52, 60))
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    sheet.convert("RGB").save(out_path)
-    return True
-
-
-def _erase_autotile_edges(tile: Image.Image, mask: int, edge_width: int) -> Image.Image:
-    output = tile.convert("RGBA").copy()
-    draw = ImageDraw.Draw(output)
-    width, height = output.size
-    edge_width = max(1, edge_width)
-    transparent = (0, 0, 0, 0)
-    if not mask & 1:
-        draw.rectangle((0, 0, width - 1, edge_width - 1), fill=transparent)
-    if not mask & 4:
-        draw.rectangle((0, height - edge_width, width - 1, height - 1), fill=transparent)
-    if not mask & 8:
-        draw.rectangle((0, 0, edge_width - 1, height - 1), fill=transparent)
-    if not mask & 2:
-        draw.rectangle((width - edge_width, 0, width - 1, height - 1), fill=transparent)
-    return output
-
-
-def _write_autotile_variant_sample(record: SpriteRecord, out_path: Path) -> bool:
-    source = _safe_open_sprite(record.output_file)
-    if source is None:
-        return False
-    tile = source.copy()
-    tile.thumbnail((32, 32), Image.Resampling.NEAREST)
-    if tile.width == 0 or tile.height == 0:
-        return False
-    edge_width = max(1, min(tile.width, tile.height) // 4)
-    cell_w = tile.width + 6
-    cell_h = tile.height + 16
-    sheet = Image.new("RGBA", (cell_w * 4, cell_h * 4), (248, 248, 248, 255))
-    draw = ImageDraw.Draw(sheet)
-    for mask in range(16):
-        col = mask % 4
-        row = mask // 4
-        x = col * cell_w
-        y = row * cell_h
-        checker = render_checker(tile.size, cell=4)
-        variant = _erase_autotile_edges(tile, mask, edge_width)
-        sheet.alpha_composite(checker, (x + 3, y + 3))
-        sheet.alpha_composite(variant, (x + 3, y + 3))
-        _draw_label(draw, (x + 3, y + tile.height + 5), f"{mask:02d}")
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    sheet.convert("RGB").save(out_path)
-    return True
-
-
-def write_visual_qa_report(records: list[SpriteRecord], out_dir: Path, manifest_dir: Path) -> None:
-    preview_dir = out_dir / "previews"
-    qa_dir = preview_dir / "visual_qa"
-    qa_dir.mkdir(parents=True, exist_ok=True)
-
-    before_after_sheets: list[dict[str, str]] = []
-    for sheet_name in sorted({record.source_sheet for record in records}):
-        boxes = preview_dir / f"{sheet_name}_boxes.png"
-        contact = preview_dir / f"{sheet_name}_contact.png"
-        if boxes.exists() or contact.exists():
-            before_after_sheets.append(
-                {
-                    "sheet": sheet_name,
-                    "before": relative_link(manifest_dir, boxes) if boxes.exists() else "",
-                    "after": relative_link(manifest_dir, contact) if contact.exists() else "",
-                }
-            )
-
-    flagged_records = [record for record in records if record.review_status == "needs_review" or record.review_flags]
-    flagged_crop_issues = [
-        {
-            "id": record.id,
-            "category": record.category,
-            "flags": record.review_flags,
-            "confidence": record.confidence,
-            "sprite": relative_link(manifest_dir, Path(record.output_file)),
-            "source_sheet": record.source_sheet,
-        }
-        for record in flagged_records[:80]
-    ]
-
-    palette_change_samples: list[dict[str, str]] = []
-    for record in records[:8]:
-        sample_path = qa_dir / f"{safe_name(record.id)}_palette_changes.png"
-        if _write_palette_change_sample(record, sample_path):
-            palette_change_samples.append(
-                {
-                    "id": record.id,
-                    "sample": relative_link(manifest_dir, sample_path),
-                    "dominant_colors": ", ".join(record.dominant_colors),
-                }
-            )
-
-    autotile_variant_samples: list[dict[str, str]] = []
-    autotile_candidates = [record for record in records if record.kind == "sprite"][:4]
-    for record in autotile_candidates:
-        sample_path = qa_dir / f"{safe_name(record.id)}_autotile_16.png"
-        if _write_autotile_variant_sample(record, sample_path):
-            autotile_variant_samples.append(
-                {
-                    "id": record.id,
-                    "sample": relative_link(manifest_dir, sample_path),
-                    "mode": "cardinal_16",
-                }
-            )
-
-    manifest = {
-        "before_after_sheets": before_after_sheets,
-        "flagged_crop_issues": flagged_crop_issues,
-        "palette_change_samples": palette_change_samples,
-        "autotile_variant_samples": autotile_variant_samples,
-    }
-    (manifest_dir / "visual_qa.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-
-    before_after_cards = []
-    for item in before_after_sheets:
-        before = html.escape(item["before"])
-        after = html.escape(item["after"])
-        before_after_cards.append(
-            "<section class=\"card before-after\">"
-            f"<h3>{html.escape(item['sheet'])}</h3>"
-            "<div class=\"pair\">"
-            f"<a href=\"{before}\"><span>Before</span><img src=\"{before}\" loading=\"lazy\" alt=\"before boxes\"></a>"
-            f"<a href=\"{after}\"><span>After</span><img src=\"{after}\" loading=\"lazy\" alt=\"after contact sheet\"></a>"
-            "</div></section>"
-        )
-
-    flagged_rows = "".join(
-        "<tr>"
-        f"<td><a href=\"{html.escape(item['sprite'])}\">{html.escape(item['id'])}</a></td>"
-        f"<td>{html.escape(item['category'])}</td>"
-        f"<td>{html.escape(', '.join(item['flags']) or 'none')}</td>"
-        f"<td>{html.escape(str(item['confidence']))}</td>"
-        f"<td>{html.escape(item['source_sheet'])}</td>"
-        "</tr>"
-        for item in flagged_crop_issues
-    )
-    palette_cards = "".join(
-        "<a class=\"sample-card\" href=\"{sample}\"><img src=\"{sample}\" loading=\"lazy\" alt=\"palette sample\"><span>{label}</span><small>{colors}</small></a>".format(
-            sample=html.escape(item["sample"]),
-            label=html.escape(item["id"]),
-            colors=html.escape(item["dominant_colors"]),
-        )
-        for item in palette_change_samples
-    )
-    autotile_cards = "".join(
-        "<a class=\"sample-card\" href=\"{sample}\"><img src=\"{sample}\" loading=\"lazy\" alt=\"autotile sample\"><span>{label}</span><small>{mode}</small></a>".format(
-            sample=html.escape(item["sample"]),
-            label=html.escape(item["id"]),
-            mode=html.escape(item["mode"]),
-        )
-        for item in autotile_variant_samples
-    )
-
-    report = f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Visual QA Review</title>
-  <style>
-    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 24px; background: #15171c; color: #e8ebf2; }}
-    a {{ color: #80b7ff; }}
-    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }}
-    .card, .sample-card {{ background: #20242b; border: 1px solid #343a46; border-radius: 6px; padding: 14px; color: #e8ebf2; text-decoration: none; }}
-    .pair {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }}
-    .pair a, .sample-card {{ display: grid; gap: 8px; min-width: 0; }}
-    img {{ max-width: 100%; image-rendering: pixelated; background: #2a2f39; border-radius: 4px; }}
-    .samples {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }}
-    small {{ color: #aeb8cc; overflow-wrap: anywhere; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
-    th, td {{ border-bottom: 1px solid #343a46; padding: 8px; text-align: left; font-size: 13px; }}
-    th {{ color: #aeb8cc; }}
-  </style>
-</head>
-<body>
-  <h1>Visual QA Review</h1>
-  <p><a href="report.html">Back to main report</a> | <a href="visual_qa.json">visual_qa.json</a></p>
-  <h2>Before / After Crop Sheets</h2>
-  <div class="grid">{''.join(before_after_cards) or '<section class="card"><p>No crop sheet previews found.</p></section>'}</div>
-  <h2>Flagged Crop Issues</h2>
-  <table>
-    <thead><tr><th>Sprite</th><th>Category</th><th>Flags</th><th>Confidence</th><th>Source Sheet</th></tr></thead>
-    <tbody>{flagged_rows or '<tr><td colspan="5">No flagged crop issues.</td></tr>'}</tbody>
-  </table>
-  <h2>Palette Change Samples</h2>
-  <div class="samples">{palette_cards or '<section class="card"><p>No palette samples generated.</p></section>'}</div>
-  <h2>Autotile Variant Samples</h2>
-  <div class="samples">{autotile_cards or '<section class="card"><p>No autotile samples generated.</p></section>'}</div>
-</body>
-</html>
-"""
-    (manifest_dir / "visual_qa.html").write_text(report, encoding="utf-8")
-
-
-def write_project_file(
-    records: list[SpriteRecord],
-    out_dir: Path,
-    options: RunOptions,
-    sheets_processed: int,
-    sheet_errors: list[SheetError],
-    animation_clips: list[dict[str, object]],
-) -> None:
-    project = {
-        "schema_version": 1,
-        "tool": "spritecut",
-        "settings": asdict(options),
-        "summary": {
-            "total_sprites": len(records),
-            "sheets_processed": sheets_processed,
-            "sheets_failed": len(sheet_errors),
-            "needs_review": sum(1 for record in records if record.review_status == "needs_review"),
-        },
-        "errors": [asdict(error) for error in sheet_errors],
-        "history": [],
-        "redo_stack": [],
-        "animation_clips": animation_clips,
-        "sprites": [asdict(record) for record in records],
-    }
-    with (out_dir / "project.spritecut.json").open("w", encoding="utf-8") as handle:
-        json.dump(project, handle, indent=2)
-
-
-def write_manifest(
-    records: list[SpriteRecord],
-    manifest_dir: Path,
-    sheets_processed: int,
-    sheet_errors: list[SheetError],
-    options: RunOptions | None = None,
-    animation_clips: list[dict[str, object]] | None = None,
-) -> None:
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    with (manifest_dir / "sprites.json").open("w", encoding="utf-8") as handle:
-        json.dump([asdict(record) for record in records], handle, indent=2)
-    with (manifest_dir / "errors.json").open("w", encoding="utf-8") as handle:
-        json.dump([asdict(error) for error in sheet_errors], handle, indent=2)
-    if animation_clips is not None:
-        with (manifest_dir / "animation_clips.json").open("w", encoding="utf-8") as handle:
-            json.dump({"animation_clips": animation_clips}, handle, indent=2)
-    if options is not None:
-        with (manifest_dir / "settings.json").open("w", encoding="utf-8") as handle:
-            json.dump(asdict(options), handle, indent=2)
-
-    with (manifest_dir / "sprites.csv").open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=[
-                "id",
-                "display_name",
-                "source_sheet",
-                "kind",
-                "sheet_mode",
-                "category",
-                "sequence",
-                "frame",
-                "output_file",
-                "x",
-                "y",
-                "width",
-                "height",
-                "slot_width",
-                "slot_height",
-                "foreground_pixels",
-                "alpha_mode",
-                "is_partial",
-                "transparency_ratio",
-                "aspect_ratio",
-                "dominant_colors",
-                "pivot_x",
-                "pivot_y",
-                "pivot_method",
-                "confidence",
-                "review_flags",
-                "review_status",
-                "atlas_name",
-                "atlas_x",
-                "atlas_y",
-                "atlas_width",
-                "atlas_height",
-                "atlas_rotated",
-            ],
-        )
-        writer.writeheader()
-        for record in records:
-            writer.writerow(
-                {
-                    "id": record.id,
-                    "display_name": record.display_name,
-                    "source_sheet": record.source_sheet,
-                    "kind": record.kind,
-                    "sheet_mode": record.sheet_mode,
-                    "category": record.category,
-                    "sequence": record.sequence if record.sequence is not None else "",
-                    "frame": record.frame if record.frame is not None else "",
-                    "output_file": record.output_file,
-                    "x": record.bbox["x"],
-                    "y": record.bbox["y"],
-                    "width": record.width,
-                    "height": record.height,
-                    "slot_width": record.slot_width if record.slot_width is not None else "",
-                    "slot_height": record.slot_height if record.slot_height is not None else "",
-                    "foreground_pixels": record.foreground_pixels,
-                    "alpha_mode": record.alpha_mode,
-                    "is_partial": record.is_partial,
-                    "transparency_ratio": record.transparency_ratio,
-                    "aspect_ratio": record.aspect_ratio,
-                    "dominant_colors": "|".join(record.dominant_colors),
-                    "pivot_x": record.pivot.get("x", ""),
-                    "pivot_y": record.pivot.get("y", ""),
-                    "pivot_method": record.pivot.get("method", ""),
-                    "confidence": record.confidence,
-                    "review_flags": "|".join(record.review_flags),
-                    "review_status": record.review_status,
-                    "atlas_name": record.atlas.get("atlas", "") if record.atlas else "",
-                    "atlas_x": record.atlas.get("rect", {}).get("x", "") if record.atlas else "",
-                    "atlas_y": record.atlas.get("rect", {}).get("y", "") if record.atlas else "",
-                    "atlas_width": record.atlas.get("rect", {}).get("width", "") if record.atlas else "",
-                    "atlas_height": record.atlas.get("rect", {}).get("height", "") if record.atlas else "",
-                    "atlas_rotated": record.atlas.get("rotated", "") if record.atlas else "",
-                }
-            )
-
-    category_counts = Counter(record.category for record in records)
-    kind_counts = Counter(record.kind for record in records)
-    sheet_counts = Counter(record.source_sheet for record in records)
-    sequence_counts = Counter(record.sequence for record in records if record.sequence)
-    partial_count = sum(1 for record in records if record.is_partial)
-    needs_review_count = sum(1 for record in records if record.review_status == "needs_review")
-    atlased_count = sum(1 for record in records if record.atlas)
-    summary = [
-        f"total_sprites={len(records)}",
-        f"sheets_processed={sheets_processed}",
-        f"sheets_failed={len(sheet_errors)}",
-        f"partial_sprites={partial_count}",
-        f"needs_review={needs_review_count}",
-        f"atlased_sprites={atlased_count}",
-        "",
-        "by_kind:",
-        *[f"{kind}={count}" for kind, count in sorted(kind_counts.items())],
-        "",
-        "by_category:",
-        *[f"{category}={count}" for category, count in sorted(category_counts.items())],
-        "",
-        "by_sequence:",
-        *[f"{sequence}={count}" for sequence, count in sorted(sequence_counts.items())],
-        "",
-        "by_sheet:",
-        *[f"{sheet}={count}" for sheet, count in sorted(sheet_counts.items())],
-    ]
-    (manifest_dir / "summary.txt").write_text("\n".join(summary) + "\n", encoding="utf-8")
-    write_visual_qa_report(records, manifest_dir.parent, manifest_dir)
-    write_visual_regression_report(manifest_dir.parent, manifest_dir)
-    write_html_report(records, manifest_dir, sheets_processed, sheet_errors, animation_clips)
-
-
-def main() -> None:
-    raw_argv = sys.argv[1:]
-    pre_parser = argparse.ArgumentParser(add_help=False)
-    pre_parser.add_argument("--config", type=Path, help="JSON config file containing default CLI options.")
-    pre_parser.add_argument("--preset", choices=sorted(BUILT_IN_PRESETS), help="Built-in preset to use before optional --config overrides.")
-    pre_parser.add_argument("--list-presets", action="store_true", help="Print built-in preset names and exit.")
-    pre_args, _remaining = pre_parser.parse_known_args()
-    if pre_args.list_presets:
-        for name in sorted(BUILT_IN_PRESETS):
-            print(name)
-        return
-    config_defaults = load_config_defaults(pre_args.config, pre_args.preset)
-
+def build_arg_parser(config_defaults: dict[str, object] | None = None, pre_parser: argparse.ArgumentParser | None = None) -> argparse.ArgumentParser:
+    defaults = config_defaults or {}
     parser = argparse.ArgumentParser(
         description="Cut packed tileset sheets or row-based animation sheets into organized sprite crops.",
-        parents=[pre_parser],
+        parents=[pre_parser or build_pre_parser()],
     )
     parser.add_argument("root", type=Path, help="Image file or folder containing sprite sheets.")
     parser.add_argument(
         "--auto-detect-all",
         dest="auto_detect_all",
         action="store_true",
-        default=bool(config_defaults.get("auto_detect_all", True)),
+        default=bool(defaults.get("auto_detect_all", True)),
         help="Infer background, thresholds, atlas/export defaults, workers, and animation FPS from the input sheets.",
     )
     parser.add_argument(
@@ -2155,53 +1042,53 @@ def main() -> None:
         action="store_false",
         help="Use literal CLI/config defaults instead of auto-inferring a processing profile.",
     )
-    parser.add_argument("--out-name", default=config_defaults.get("out_name", "_organized_sprites"), help="Name for the output folder created beside the input.")
+    parser.add_argument("--out-name", default=defaults.get("out_name", "_organized_sprites"), help="Name for the output folder created beside the input.")
     parser.add_argument(
         "--mode",
         choices=["auto", "tileset", "animation"],
-        default=config_defaults.get("mode", "auto"),
+        default=defaults.get("mode", "auto"),
         help="auto detects animation-like sheets; tileset forces category folders; animation forces row/frame folders.",
     )
     parser.add_argument(
         "--animation-names",
-        default=config_defaults.get("animation_names", ""),
+        default=defaults.get("animation_names", ""),
         help="Comma-separated sequence names for animation rows, for example idle,run,attack.",
     )
     parser.add_argument(
         "--animation-frame-mode",
         choices=["fixed", "trimmed"],
-        default=config_defaults.get("animation_frame_mode", "fixed"),
+        default=defaults.get("animation_frame_mode", "fixed"),
         help="fixed keeps each row on same-sized canvases; trimmed exports tight crops.",
     )
     parser.add_argument(
         "--animation-anchor",
         choices=["bottom-center", "center"],
-        default=config_defaults.get("animation_anchor", "bottom-center"),
+        default=defaults.get("animation_anchor", "bottom-center"),
         help="Anchor used when placing trimmed sprites on fixed animation canvases.",
     )
     parser.add_argument(
         "--animation-min-frames",
         type=int,
-        default=config_defaults.get("animation_min_frames", 3),
+        default=defaults.get("animation_min_frames", 3),
         help="Minimum frames per row for auto animation detection.",
     )
     parser.add_argument(
         "--animation-fps",
         type=int,
-        default=config_defaults.get("animation_fps", 8),
+        default=defaults.get("animation_fps", 8),
         help="Frame rate written into generated animation clip metadata.",
     )
     parser.add_argument(
         "--pivot-debug",
         action="store_true",
-        default=bool(config_defaults.get("pivot_debug", False)),
+        default=bool(defaults.get("pivot_debug", False)),
         help="Save per-sprite debug previews with contours and pivot crosses.",
     )
     parser.add_argument(
         "--pack-atlases",
         dest="pack_atlases",
         action="store_true",
-        default=bool(config_defaults.get("pack_atlases", False)),
+        default=bool(defaults.get("pack_atlases", False)),
         help="Pack extracted sprites into category atlases after cutting.",
     )
     parser.add_argument(
@@ -2213,24 +1100,24 @@ def main() -> None:
     parser.add_argument(
         "--atlas-size",
         type=int,
-        default=config_defaults.get("atlas_size", 2048),
+        default=defaults.get("atlas_size", 2048),
         help="Square atlas size used when --pack-atlases is enabled.",
     )
     parser.add_argument(
         "--atlas-padding",
         type=int,
-        default=config_defaults.get("atlas_padding", 2),
+        default=defaults.get("atlas_padding", 2),
         help="Padding in pixels around sprites in generated atlases.",
     )
     parser.add_argument(
         "--atlas-allow-rotation",
         action="store_true",
-        default=bool(config_defaults.get("atlas_allow_rotation", False)),
+        default=bool(defaults.get("atlas_allow_rotation", False)),
         help="Allow 90-degree rotation while atlas packing.",
     )
     parser.add_argument(
         "--engine-exports",
-        default=config_defaults.get("engine_exports", ""),
+        default=defaults.get("engine_exports", ""),
         help="Comma-separated export presets to write: unity,godot,unreal, or all.",
     )
     parser.add_argument(
@@ -2243,97 +1130,80 @@ def main() -> None:
     parser.add_argument(
         "--alpha-threshold",
         type=int,
-        default=config_defaults.get("alpha_threshold", 10),
+        default=defaults.get("alpha_threshold", 10),
         help="Alpha values at or below this are treated as transparent background.",
     )
     parser.add_argument(
         "--white-threshold",
         type=int,
-        default=config_defaults.get("white_threshold", WHITE_THRESHOLD),
+        default=defaults.get("white_threshold", WHITE_THRESHOLD),
         help="RGB values at or above this can be treated as white background.",
     )
     parser.add_argument(
         "--white-tolerance",
         type=int,
-        default=config_defaults.get("white_tolerance", 8),
+        default=defaults.get("white_tolerance", 8),
         help="Allowed RGB channel spread for white-background detection.",
     )
     parser.add_argument(
         "--dark-artifact-threshold",
         type=int,
-        default=config_defaults.get("dark_artifact_threshold", DARK_ARTIFACT_THRESHOLD),
+        default=defaults.get("dark_artifact_threshold", DARK_ARTIFACT_THRESHOLD),
         help="Dark matte artifact threshold for removing large black background chunks.",
     )
     parser.add_argument(
         "--min-sprite-pixels",
         type=int,
-        default=config_defaults.get("min_sprite_pixels", MIN_GROUP_PIXELS),
+        default=defaults.get("min_sprite_pixels", MIN_GROUP_PIXELS),
         help="Minimum foreground pixels required to keep a detected component.",
     )
     parser.add_argument(
         "--min-sprite-width",
         type=int,
-        default=config_defaults.get("min_sprite_width", MIN_WIDTH),
+        default=defaults.get("min_sprite_width", MIN_WIDTH),
         help="Minimum detected component width.",
     )
     parser.add_argument(
         "--min-sprite-height",
         type=int,
-        default=config_defaults.get("min_sprite_height", MIN_HEIGHT),
+        default=defaults.get("min_sprite_height", MIN_HEIGHT),
         help="Minimum detected component height.",
     )
     parser.add_argument(
         "--crop-padding",
         type=int,
-        default=config_defaults.get("crop_padding", PADDING),
+        default=defaults.get("crop_padding", PADDING),
         help="Padding around each extracted sprite crop.",
     )
     parser.add_argument(
         "--on-error",
         choices=["skip", "fail"],
-        default=config_defaults.get("on_error", "skip"),
+        default=defaults.get("on_error", "skip"),
         help="Skip unreadable/problematic sheets by default, or fail fast.",
     )
     parser.add_argument(
         "--workers",
         type=int,
-        default=config_defaults.get("workers", 1),
+        default=defaults.get("workers", 1),
         help="Number of worker threads used for batch sheet processing.",
     )
     parser.add_argument(
         "--max-image-megapixels",
         type=float,
-        default=config_defaults.get("max_image_megapixels", 0),
+        default=defaults.get("max_image_megapixels", 0),
         help="Skip/fail sheets larger than this many megapixels; 0 disables the guard.",
     )
     parser.add_argument(
         "--resume",
         action="store_true",
-        default=bool(config_defaults.get("resume", False)),
+        default=bool(defaults.get("resume", False)),
         help="Reuse an existing --out-name folder and skip sheets already present in its manifest.",
     )
-    args = parser.parse_args()
+    return parser
 
-    input_path = args.root.resolve()
-    if not input_path.exists():
-        raise SystemExit(f"Missing input: {input_path}")
 
-    sheets = discover_sheet_files(input_path)
-    if not sheets:
-        raise SystemExit(f"No supported image sheets found in {input_path}")
-
-    auto_profile: dict[str, object] = {}
-    if args.auto_detect_all:
-        auto_profile = infer_auto_defaults(sheets)
-        apply_auto_defaults(args, auto_profile, config_defaults, raw_argv)
-
-    output_base = input_path.parent if input_path.is_file() else input_path
-    preferred_out_dir = output_base / args.out_name
-    out_dir = preferred_out_dir if args.resume and preferred_out_dir.exists() else unique_output_dir(output_base, args.out_name)
-    preview_dir = out_dir / "previews"
-    manifest_dir = out_dir / "manifest"
-    preview_dir.mkdir(parents=True, exist_ok=True)
-    options = RunOptions(
+def options_from_args(args: argparse.Namespace, auto_profile: dict[str, object] | None = None) -> RunOptions:
+    return RunOptions(
         mode=args.mode,
         animation_names=parse_animation_names(args.animation_names),
         animation_frame_mode=args.animation_frame_mode,
@@ -2361,9 +1231,17 @@ def main() -> None:
         max_image_megapixels=max(0.0, float(args.max_image_megapixels)),
         resume=args.resume,
         auto_detect_all=args.auto_detect_all,
-        auto_profile=auto_profile,
+        auto_profile=auto_profile or {},
     )
 
+
+def process_sheet_batch(
+    sheets: list[Path],
+    out_dir: Path,
+    preview_dir: Path,
+    manifest_dir: Path,
+    options: RunOptions,
+) -> tuple[list[SpriteRecord], list[SheetError], int]:
     all_records: list[SpriteRecord] = load_existing_records(manifest_dir) if options.resume else []
     sheet_errors: list[SheetError] = load_existing_errors(manifest_dir) if options.resume else []
     processed_sources = {str(Path(record.source_file).resolve()) for record in all_records}
@@ -2408,21 +1286,78 @@ def main() -> None:
             if records is not None:
                 all_records.extend(records)
                 sheets_processed += 1
+    return all_records, sheet_errors, sheets_processed
 
+
+def write_run_outputs(
+    records: list[SpriteRecord],
+    out_dir: Path,
+    manifest_dir: Path,
+    sheets_processed: int,
+    sheet_errors: list[SheetError],
+    options: RunOptions,
+) -> None:
     if options.pack_atlases:
-        pack_records_into_atlases(all_records, out_dir, options)
-    animation_clips = build_animation_clips(all_records, options.animation_fps)
-    write_engine_exports(all_records, out_dir, options.engine_exports, animation_clips)
-    write_project_file(all_records, out_dir, options, sheets_processed, sheet_errors, animation_clips)
-    write_manifest(all_records, manifest_dir, sheets_processed, sheet_errors, options, animation_clips)
+        pack_records_into_atlases(records, out_dir, options)
+    animation_clips = build_animation_clips(records, options.animation_fps)
+    write_engine_exports(records, out_dir, options.engine_exports, animation_clips)
+    write_project_file(records, out_dir, options, sheets_processed, sheet_errors, animation_clips)
+    write_manifest(records, manifest_dir, sheets_processed, sheet_errors, options, animation_clips)
 
+
+def print_run_summary(out_dir: Path, records: list[SpriteRecord]) -> None:
     print(f"OUTPUT={out_dir}")
-    print(f"SPRITES={len(all_records)}")
-    for kind, count in sorted(Counter(record.kind for record in all_records).items()):
+    print(f"SPRITES={len(records)}")
+    for kind, count in sorted(Counter(record.kind for record in records).items()):
         print(f"KIND {kind}={count}")
-    for category, count in sorted(Counter(record.category for record in all_records).items()):
+    for category, count in sorted(Counter(record.category for record in records).items()):
         print(f"CATEGORY {category}={count}")
 
 
+def run_from_args(args: argparse.Namespace, config_defaults: dict[str, object], raw_argv: list[str]) -> int:
+    input_path = args.root.resolve()
+    if not input_path.exists():
+        raise SystemExit(f"Missing input: {input_path}")
+
+    sheets = discover_sheet_files(input_path)
+    if not sheets:
+        raise SystemExit(f"No supported image sheets found in {input_path}")
+
+    auto_profile: dict[str, object] = {}
+    if args.auto_detect_all:
+        auto_profile = infer_auto_defaults(sheets)
+        apply_auto_defaults(args, auto_profile, config_defaults, raw_argv)
+
+    output_base = input_path.parent if input_path.is_file() else input_path
+    preferred_out_dir = output_base / args.out_name
+    out_dir = preferred_out_dir if args.resume and preferred_out_dir.exists() else unique_output_dir(output_base, args.out_name)
+    preview_dir = out_dir / "previews"
+    manifest_dir = out_dir / "manifest"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    options = options_from_args(args, auto_profile)
+    records, sheet_errors, sheets_processed = process_sheet_batch(sheets, out_dir, preview_dir, manifest_dir, options)
+    write_run_outputs(records, out_dir, manifest_dir, sheets_processed, sheet_errors, options)
+    print_run_summary(out_dir, records)
+    return 0
+
+
+def run_cli(argv: list[str] | None = None) -> int:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    pre_parser = build_pre_parser()
+    pre_args, _remaining = pre_parser.parse_known_args(raw_argv)
+    if pre_args.list_presets:
+        for name in sorted(BUILT_IN_PRESETS):
+            print(name)
+        return 0
+    config_defaults = load_config_defaults(pre_args.config, pre_args.preset)
+    parser = build_arg_parser(config_defaults, pre_parser)
+    args = parser.parse_args(raw_argv)
+    return run_from_args(args, config_defaults, raw_argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run_cli(argv)
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

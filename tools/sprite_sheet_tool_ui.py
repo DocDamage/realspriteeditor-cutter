@@ -762,6 +762,281 @@ def _image_texture_data(image: Image.Image) -> tuple[int, int, list[float]]:
     return rgba.width, rgba.height, data
 
 
+class SpriteToolPanel:
+    def __init__(self, app: "SpriteSheetToolUi") -> None:
+        self.app = app
+
+    def build(self) -> None:
+        raise NotImplementedError
+
+
+class LeftInputPanel(SpriteToolPanel):
+    def build(self) -> None:
+        app = self.app
+        dpg.add_text("Input")
+        app._add_input_text("##input_path", app.input_path, "input_path", "input_path", width=-1)
+        app._add_button("Add Folder", app.choose_folder, "add_folder", width=-1)
+        app._add_button("Add File", app.choose_file, "add_file", width=-1)
+        app._add_button("Refresh", app.refresh_files, "refresh_files", width=-1)
+        dpg.add_spacer(height=8)
+        dpg.add_text("Sheets")
+        with dpg.child_window(tag="file_list_panel", width=-1, height=470, border=True):
+            pass
+        attach_tooltip("file_list_panel", "file_list")
+        app.file_list = DpgSelectableList("file_list_panel", on_select=app.update_preview)
+
+
+class CenterPreviewPanel(SpriteToolPanel):
+    def build(self) -> None:
+        app = self.app
+        with dpg.group(horizontal=True):
+            dpg.add_text("Preview")
+            dpg.add_spacer(width=330)
+            app._add_combo("##preview_accessibility", app.preview_accessibility_mode, PREVIEW_ACCESSIBILITY_MODES, "preview_accessibility", width=150, callback=lambda *_args: app.update_preview())
+        with dpg.child_window(tag="preview_panel", width=-1, height=520, border=True):
+            dpg.add_text("Choose a folder or file to preview sheets.", tag="preview_placeholder", wrap=620)
+        with dpg.group(horizontal=True):
+            dpg.add_text("Idle", tag="progress_text")
+            app._add_button("Process", app.process, "process", tag="process_button")
+            app._add_button("Reset Log", app.clear_log, "reset_log")
+            app._add_button("Cancel", app.cancel_process, "cancel", tag="cancel_button", enabled=False)
+        with dpg.group(horizontal=True):
+            app._add_button("Open Output", app.open_latest_output, "open_output", tag="open_output_button", enabled=False)
+            app._add_button("Open Report", app.open_latest_report, "open_report", tag="open_report_button", enabled=False)
+            app._add_button("Open Project", app.open_latest_project, "open_project", tag="open_project_button", enabled=False)
+        dpg.add_input_text(tag="log_text", multiline=True, readonly=True, width=-1, height=150, default_value="")
+
+
+class SettingsTabsPanel(SpriteToolPanel):
+    def build(self) -> None:
+        app = self.app
+        dpg.add_text("Settings")
+        with dpg.tab_bar(tag="settings_tabs"):
+            with dpg.tab(label="Core"):
+                RunSettingsPanel(app).build()
+            with dpg.tab(label="Detect"):
+                DetectionSettingsPanel(app).build()
+            with dpg.tab(label="Output"):
+                OutputSettingsPanel(app).build()
+            with dpg.tab(label="Review"):
+                ReviewSettingsPanel(app).build()
+            with dpg.tab(label="Studio"):
+                StudioSettingsPanel(app).build()
+            with dpg.tab(label="Editor"):
+                EditorSettingsPanel(app).build()
+
+
+class RunSettingsPanel(SpriteToolPanel):
+    def build(self) -> None:
+        app = self.app
+        dpg.add_text("Output")
+        app._add_input_text("##out_name", app.out_name, "out_name", "out_name", width=-1)
+        app._add_checkbox("Auto detect all", app.auto_detect_all, "auto_detect_all")
+        dpg.add_text("Built-In Preset")
+        app._add_combo("##builtin_preset", app.builtin_preset, builtin_preset_names(), "builtin_preset", width=-1)
+        app._add_button("Apply Preset", app.apply_builtin_preset, "apply_preset", width=-1)
+        dpg.add_text("Mode")
+        app._add_combo("##mode", app.mode, ["auto", "tileset", "animation"], "mode", width=-1)
+        dpg.add_text("Animation Rows")
+        app._add_input_text("##animation_names", app.animation_names, "animation_names", "animation_names", width=-1)
+        dpg.add_text("Frame Mode")
+        app._add_combo("##animation_frame_mode", app.animation_frame_mode, ["fixed", "trimmed"], "animation_frame_mode", width=-1)
+        dpg.add_text("Anchor")
+        app._add_combo("##animation_anchor", app.animation_anchor, ["bottom-center", "center"], "animation_anchor", width=-1)
+        app._add_input_int("Min Frames", app.animation_min_frames, "animation_min_frames", "animation_min_frames", min_value=1, max_value=24)
+        app._add_input_int("FPS", app.animation_fps, "animation_fps", "animation_fps", min_value=1, max_value=60)
+        app._add_checkbox("Pivot debug previews", app.pivot_debug, "pivot_debug")
+
+
+class DetectionSettingsPanel(SpriteToolPanel):
+    def build(self) -> None:
+        app = self.app
+        controls = [
+            ("Alpha Threshold", app.alpha_threshold, 0, 255, "alpha_threshold"),
+            ("White Threshold", app.white_threshold, 0, 255, "white_threshold"),
+            ("White Tolerance", app.white_tolerance, 0, 64, "white_tolerance"),
+            ("Dark Artifact", app.dark_artifact_threshold, 0, 255, "dark_artifact_threshold"),
+            ("Min Pixels", app.min_sprite_pixels, 1, 10000, "min_sprite_pixels"),
+            ("Min Width", app.min_sprite_width, 1, 512, "min_sprite_width"),
+            ("Min Height", app.min_sprite_height, 1, 512, "min_sprite_height"),
+            ("Crop Padding", app.crop_padding, 0, 64, "crop_padding"),
+        ]
+        for label, variable, min_value, max_value, tooltip_key in controls:
+            app._add_input_int(label, variable, tooltip_key, tooltip_key, min_value=min_value, max_value=max_value)
+        dpg.add_text("On Error")
+        app._add_combo("##on_error", app.on_error, ["skip", "fail"], "on_error", width=-1)
+
+
+class OutputSettingsPanel(SpriteToolPanel):
+    def build(self) -> None:
+        app = self.app
+        app._add_checkbox("Pack atlases", app.pack_atlases, "pack_atlases")
+        app._add_input_int("Atlas Size", app.atlas_size, "atlas_size", "atlas_size", min_value=64, max_value=16384)
+        app._add_input_int("Padding", app.atlas_padding, "atlas_padding", "atlas_padding", min_value=0, max_value=128)
+        app._add_checkbox("Allow rotation", app.atlas_allow_rotation, "atlas_allow_rotation")
+        dpg.add_text("Exports")
+        attach_tooltip(dpg.last_item(), "engine_exports")
+        app._add_checkbox("Unity", app.export_unity, "export_unity")
+        app._add_checkbox("Godot", app.export_godot, "export_godot")
+        app._add_checkbox("Unreal", app.export_unreal, "export_unreal")
+        dpg.add_spacer(height=10)
+        app._add_button("Save Preset", app.save_preset, "save_preset", width=-1)
+        app._add_button("Load Preset", app.load_preset, "load_preset", width=-1)
+
+
+class ReviewSettingsPanel(SpriteToolPanel):
+    def build(self) -> None:
+        app = self.app
+        with dpg.group(horizontal=True):
+            app._add_button("Load Project", app.load_project_dialog, "load_project")
+            app._add_button("Save Project", app.save_project_dialog, "save_project")
+        with dpg.group(horizontal=True):
+            app._add_button("Undo", app.undo_project_edit, "undo")
+            app._add_button("Redo", app.redo_project_edit, "redo")
+        app._add_button("Apply Outputs", app.apply_project_outputs, "apply_outputs", width=-1)
+        dpg.add_text("Filter")
+        with dpg.group(horizontal=True):
+            app._add_combo("##review_filter", app.review_status_filter, ["all", "needs_review", "approved", "rejected"], "review_filter", width=120, callback=lambda *_args: app.refresh_project_rows())
+            app._add_input_text("##review_query", app.review_query, "review_query", "review_query", width=145, callback=lambda *_args: app.refresh_project_rows())
+        with dpg.child_window(tag="review_list_panel", width=-1, height=130, border=True):
+            pass
+        attach_tooltip("review_list_panel", "review_list")
+        app._review_list = DpgSelectableList("review_list_panel", multi=True, on_select=app.populate_review_editor)
+        with dpg.child_window(tag="review_image_panel", width=-1, height=140, border=True):
+            dpg.add_text("Load a project to review sprites.", wrap=260)
+        with dpg.group(tag="review_source_canvas_frame"):
+            dpg.add_drawlist(tag="review_source_canvas", width=REVIEW_CANVAS_SIZE[0], height=REVIEW_CANVAS_SIZE[1])
+        attach_tooltip("review_source_canvas_frame", "review_source_canvas")
+        with dpg.item_handler_registry(tag="review_canvas_handlers"):
+            dpg.add_item_clicked_handler(callback=app._on_review_canvas_press)
+        dpg.bind_item_handler_registry("review_source_canvas", "review_canvas_handlers")
+        dpg.add_text("Animation Clip")
+        app._add_combo("##animation_clip", app.review_animation_clip, [], "animation_clip", tag="review_animation_combo", width=-1)
+        with dpg.group(horizontal=True):
+            app._add_button("Play", app.play_review_animation, "play_animation")
+            app._add_button("Stop", app.stop_review_animation, "stop_animation")
+        dpg.add_text("Name")
+        app._add_input_text("##review_name", app.review_name, "review_name", "review_name", width=-1)
+        dpg.add_text("Category")
+        app._add_input_text("##review_category", app.review_category, "review_category", "review_category", width=-1)
+        dpg.add_text("BBox x/y/w/h")
+        with dpg.group(horizontal=True):
+            app._add_input_text("##review_bbox_x", app.review_bbox_x, "review_bbox_x", "review_bbox", width=58)
+            app._add_input_text("##review_bbox_y", app.review_bbox_y, "review_bbox_y", "review_bbox", width=58)
+            app._add_input_text("##review_bbox_width", app.review_bbox_width, "review_bbox_width", "review_bbox", width=58)
+            app._add_input_text("##review_bbox_height", app.review_bbox_height, "review_bbox_height", "review_bbox", width=58)
+        dpg.add_text("Pivot x/y")
+        with dpg.group(horizontal=True):
+            app._add_input_text("##review_pivot_x", app.review_pivot_x, "review_pivot_x", "review_pivot", width=100)
+            app._add_input_text("##review_pivot_y", app.review_pivot_y, "review_pivot_y", "review_pivot", width=100)
+        dpg.add_text("Status / Flags")
+        with dpg.group(horizontal=True):
+            app._add_combo("##review_status", app.review_status, ["needs_review", "approved", "rejected"], "review_status", width=120)
+            app._add_input_text("##review_flags", app.review_flags, "review_flags", "review_flags", width=130)
+        app._add_button("Apply Edit", app.apply_review_edit, "apply_edit", width=-1)
+        with dpg.group(horizontal=True):
+            app._add_button("Approve", app.approve_review_sprite, "approve")
+            app._add_button("Reject", app.reject_review_sprite, "reject")
+        dpg.add_text("Split boxes")
+        app._add_input_text("##split_boxes", app.review_split_boxes, "split_boxes", "split_boxes", width=-1)
+        with dpg.group(horizontal=True):
+            app._add_button("Split Selected", app.split_review_sprite, "split_selected")
+            app._add_button("Merge Selected", app.merge_review_sprites, "merge_selected")
+
+
+class StudioSettingsPanel(SpriteToolPanel):
+    def build(self) -> None:
+        app = self.app
+        with dpg.group(horizontal=True):
+            app._add_button("Refresh", app.refresh_studio_panel, "studio_refresh")
+            app._add_button("Review + Apply", app.review_apply_studio_project, "studio_review_apply")
+        with dpg.group(horizontal=True):
+            app._add_button("Auto Name", app.auto_name_studio_project, "studio_auto_name")
+            app._add_button("Profiles", app.generate_studio_profiles, "studio_generate_profiles")
+        with dpg.group(horizontal=True):
+            app._add_button("Diff Project", app.diff_studio_project, "studio_diff_project")
+            app._add_button("Train Preset", app.train_studio_preset, "studio_train_preset")
+        dpg.add_text("Taxonomy Pattern")
+        app._add_input_text("##studio_taxonomy_pattern", app.studio_taxonomy_pattern, "studio_taxonomy_pattern", "studio_taxonomy_pattern", width=-1)
+        dpg.add_text("Dashboard")
+        dpg.add_text("Load a project to build a studio dashboard.", tag="studio_dashboard_label", wrap=260)
+        attach_tooltip("studio_dashboard_label", "studio_dashboard")
+        dpg.add_text("Review Queue")
+        with dpg.child_window(tag="studio_queue_panel", width=-1, height=100, border=True):
+            pass
+        attach_tooltip("studio_queue_panel", "studio_queue")
+        app._studio_queue_list = DpgSelectableList("studio_queue_panel")
+        dpg.add_text("Asset Browser")
+        with dpg.group(horizontal=True):
+            app._add_combo("##studio_status_filter", app.studio_status_filter, ["all", "needs_review", "approved", "rejected"], "studio_asset_query", width=120, callback=lambda *_args: app.refresh_studio_panel())
+            app._add_input_text("##studio_query", app.studio_query, "studio_query", "studio_asset_query", width=130, callback=lambda *_args: app.refresh_studio_panel())
+        with dpg.child_window(tag="studio_asset_panel", width=-1, height=140, border=True):
+            pass
+        attach_tooltip("studio_asset_panel", "studio_asset_list")
+        app._studio_asset_list = DpgSelectableList("studio_asset_panel")
+
+
+class EditorSettingsPanel(SpriteToolPanel):
+    def build(self) -> None:
+        app = self.app
+        with dpg.group(horizontal=True):
+            app._add_button("Load Sprite", app.load_editor_sprite_dialog, "editor_load_sprite")
+            app._add_button("Save Package", app.save_editor_package, "editor_save_package")
+        with dpg.child_window(tag="editor_preview_panel", width=-1, height=145, border=True):
+            dpg.add_text("Load a sprite to edit.", wrap=260)
+        dpg.add_text("Palette: none", tag="editor_palette_label", wrap=260)
+        attach_tooltip("editor_palette_label", "editor_palette_summary")
+        dpg.add_text("Palette Swap")
+        with dpg.group(horizontal=True):
+            app._add_input_text("##editor_source_color", app.editor_source_color, "editor_source_color", "editor_source_color", width=120)
+            app._add_input_text("##editor_target_color", app.editor_target_color, "editor_target_color", "editor_target_color", width=120)
+        app._add_button("Swap", app.apply_editor_palette_swap, "editor_swap_colors", width=-1)
+        dpg.add_text("Color Wheel")
+        with dpg.group(horizontal=True):
+            app._add_combo("##editor_harmony", app.editor_harmony, ["complementary", "analogous", "triadic", "tetradic"], "editor_color_wheel", width=135)
+            app._add_input_text("##editor_hue_degrees", app.editor_hue_degrees, "editor_hue_degrees", "editor_hue_degrees", width=100)
+        with dpg.group(horizontal=True):
+            app._add_button("Hue Shift", app.apply_editor_hue_shift, "editor_hue_shift")
+            app._add_button("Wheel", app.preview_editor_color_wheel, "editor_color_wheel")
+        dpg.add_text("Auto-Tile")
+        with dpg.group(horizontal=True):
+            app._add_input_text("##editor_autotile_name", app.editor_autotile_name, "editor_autotile_name", "editor_autotile_name", width=135)
+            app._add_combo("##editor_engine", app.editor_engine, ["generic", "unity", "godot", "unreal"], "engine_exports", width=100)
+        app._add_button("Generate Auto-Tile", app.generate_editor_autotile, "editor_generate_autotile", width=-1)
+        app._add_button("IDE Actions", app.show_editor_ide_actions, "editor_ide_api", width=-1)
+
+
+class UiController:
+    def __init__(self, app: "SpriteSheetToolUi") -> None:
+        self.app = app
+
+
+class ProcessingController(UiController):
+    def process(self, *args: object) -> None:
+        self.app._process_impl(*args)
+
+
+class ReviewProjectController(UiController):
+    def refresh_project_rows(self, *args: object) -> None:
+        self.app._refresh_project_rows_impl(*args)
+
+
+class StudioController(UiController):
+    def refresh_studio_panel(self, *args: object) -> None:
+        self.app._refresh_studio_panel_impl(*args)
+
+
+class SpriteEditorController(UiController):
+    def _load_editor_sprite_impl(self, path: Path) -> None:
+        self.app._load_editor_sprite_impl(path)
+
+    def apply_palette_swap(self, *args: object) -> None:
+        self.app._apply_editor_palette_swap_impl(*args)
+
+    def apply_hue_shift(self, *args: object) -> None:
+        self.app._apply_editor_hue_shift_impl(*args)
+
+
 class SpriteSheetToolUi:
     def __init__(self, *, build: bool = True) -> None:
         self.input_path = DpgValue("")
@@ -850,6 +1125,10 @@ class SpriteSheetToolUi:
         self._review_list: DpgSelectableList | None = None
         self._studio_queue_list: DpgSelectableList | None = None
         self._studio_asset_list: DpgSelectableList | None = None
+        self.processing_controller = ProcessingController(self)
+        self.review_controller = ReviewProjectController(self)
+        self.studio_controller = StudioController(self)
+        self.editor_controller = SpriteEditorController(self)
 
         if build and dpg is not None:
             self._build()
@@ -916,228 +1195,71 @@ class SpriteSheetToolUi:
     def _build_layout(self) -> None:
         if dpg is None:
             return
+        left_panel, center_panel, settings_panel = self._panel_builders()
         with dpg.window(tag=self._main_window, label="Sprite Sheet Processor", no_title_bar=True):
             with dpg.group(horizontal=True):
                 with dpg.child_window(width=LEFT_PANEL_WIDTH, height=-1, border=True):
-                    self._build_left_panel()
+                    left_panel.build()
                 with dpg.child_window(width=CENTER_PANEL_WIDTH, height=-1, border=True):
-                    self._build_center_panel()
+                    center_panel.build()
                 with dpg.child_window(width=RIGHT_PANEL_WIDTH, height=-1, border=True):
-                    self._build_right_panel()
+                    settings_panel.build()
         dpg.create_viewport(title="Sprite Sheet Processor", width=VIEWPORT_SIZE[0], height=VIEWPORT_SIZE[1])
         dpg.set_primary_window(self._main_window, True)
         with dpg.handler_registry(tag="spritecut_global_handlers"):
             dpg.add_mouse_drag_handler(button=dpg.mvMouseButton_Left, callback=self._on_review_canvas_drag)
             dpg.add_mouse_release_handler(button=dpg.mvMouseButton_Left, callback=self._on_review_canvas_release)
 
+    def _panel_builders(self) -> list[SpriteToolPanel]:
+        return [LeftInputPanel(self), CenterPreviewPanel(self), SettingsTabsPanel(self)]
+
+    def _controllers(self) -> list[UiController]:
+        return [self.processing_controller, self.review_controller, self.studio_controller, self.editor_controller]
+
+    def process(self, *_args: object) -> None:
+        self.processing_controller.process(*_args)
+
+    def refresh_project_rows(self, *_args: object) -> None:
+        self.review_controller.refresh_project_rows(*_args)
+
+    def refresh_studio_panel(self, *_args: object) -> None:
+        self.studio_controller.refresh_studio_panel(*_args)
+
+    def load_editor_sprite(self, path: Path) -> None:
+        self.editor_controller.load_editor_sprite(path)
+
+    def apply_editor_palette_swap(self, *_args: object) -> None:
+        self.editor_controller.apply_palette_swap(*_args)
+
+    def apply_editor_hue_shift(self, *_args: object) -> None:
+        self.editor_controller.apply_hue_shift(*_args)
+
     def _build_left_panel(self) -> None:
-        dpg.add_text("Input")
-        self._add_input_text("##input_path", self.input_path, "input_path", "input_path", width=-1)
-        self._add_button("Add Folder", self.choose_folder, "add_folder", width=-1)
-        self._add_button("Add File", self.choose_file, "add_file", width=-1)
-        self._add_button("Refresh", self.refresh_files, "refresh_files", width=-1)
-        dpg.add_spacer(height=8)
-        dpg.add_text("Sheets")
-        with dpg.child_window(tag="file_list_panel", width=-1, height=470, border=True):
-            pass
-        attach_tooltip("file_list_panel", "file_list")
-        self.file_list = DpgSelectableList("file_list_panel", on_select=self.update_preview)
+        LeftInputPanel(self).build()
 
     def _build_center_panel(self) -> None:
-        with dpg.group(horizontal=True):
-            dpg.add_text("Preview")
-            dpg.add_spacer(width=330)
-            self._add_combo("##preview_accessibility", self.preview_accessibility_mode, PREVIEW_ACCESSIBILITY_MODES, "preview_accessibility", width=150, callback=lambda *_args: self.update_preview())
-        with dpg.child_window(tag="preview_panel", width=-1, height=520, border=True):
-            dpg.add_text("Choose a folder or file to preview sheets.", tag="preview_placeholder", wrap=620)
-        with dpg.group(horizontal=True):
-            dpg.add_text("Idle", tag="progress_text")
-            self._add_button("Process", self.process, "process", tag="process_button")
-            self._add_button("Reset Log", self.clear_log, "reset_log")
-            self._add_button("Cancel", self.cancel_process, "cancel", tag="cancel_button", enabled=False)
-        with dpg.group(horizontal=True):
-            self._add_button("Open Output", self.open_latest_output, "open_output", tag="open_output_button", enabled=False)
-            self._add_button("Open Report", self.open_latest_report, "open_report", tag="open_report_button", enabled=False)
-            self._add_button("Open Project", self.open_latest_project, "open_project", tag="open_project_button", enabled=False)
-        dpg.add_input_text(tag="log_text", multiline=True, readonly=True, width=-1, height=150, default_value="")
+        CenterPreviewPanel(self).build()
 
     def _build_right_panel(self) -> None:
-        dpg.add_text("Settings")
-        with dpg.tab_bar(tag="settings_tabs"):
-            with dpg.tab(label="Core"):
-                self._build_core_settings()
-            with dpg.tab(label="Detect"):
-                self._build_detection_settings()
-            with dpg.tab(label="Output"):
-                self._build_output_settings()
-            with dpg.tab(label="Review"):
-                self._build_review_settings()
-            with dpg.tab(label="Studio"):
-                self._build_studio_settings()
-            with dpg.tab(label="Editor"):
-                self._build_editor_settings()
+        SettingsTabsPanel(self).build()
 
     def _build_core_settings(self) -> None:
-        dpg.add_text("Output")
-        self._add_input_text("##out_name", self.out_name, "out_name", "out_name", width=-1)
-        self._add_checkbox("Auto detect all", self.auto_detect_all, "auto_detect_all")
-        dpg.add_text("Built-In Preset")
-        self._add_combo("##builtin_preset", self.builtin_preset, builtin_preset_names(), "builtin_preset", width=-1)
-        self._add_button("Apply Preset", self.apply_builtin_preset, "apply_preset", width=-1)
-        dpg.add_text("Mode")
-        self._add_combo("##mode", self.mode, ["auto", "tileset", "animation"], "mode", width=-1)
-        dpg.add_text("Animation Rows")
-        self._add_input_text("##animation_names", self.animation_names, "animation_names", "animation_names", width=-1)
-        dpg.add_text("Frame Mode")
-        self._add_combo("##animation_frame_mode", self.animation_frame_mode, ["fixed", "trimmed"], "animation_frame_mode", width=-1)
-        dpg.add_text("Anchor")
-        self._add_combo("##animation_anchor", self.animation_anchor, ["bottom-center", "center"], "animation_anchor", width=-1)
-        self._add_input_int("Min Frames", self.animation_min_frames, "animation_min_frames", "animation_min_frames", min_value=1, max_value=24)
-        self._add_input_int("FPS", self.animation_fps, "animation_fps", "animation_fps", min_value=1, max_value=60)
-        self._add_checkbox("Pivot debug previews", self.pivot_debug, "pivot_debug")
+        RunSettingsPanel(self).build()
 
     def _build_detection_settings(self) -> None:
-        controls = [
-            ("Alpha Threshold", self.alpha_threshold, 0, 255, "alpha_threshold"),
-            ("White Threshold", self.white_threshold, 0, 255, "white_threshold"),
-            ("White Tolerance", self.white_tolerance, 0, 64, "white_tolerance"),
-            ("Dark Artifact", self.dark_artifact_threshold, 0, 255, "dark_artifact_threshold"),
-            ("Min Pixels", self.min_sprite_pixels, 1, 10000, "min_sprite_pixels"),
-            ("Min Width", self.min_sprite_width, 1, 512, "min_sprite_width"),
-            ("Min Height", self.min_sprite_height, 1, 512, "min_sprite_height"),
-            ("Crop Padding", self.crop_padding, 0, 64, "crop_padding"),
-        ]
-        for label, variable, min_value, max_value, tooltip_key in controls:
-            self._add_input_int(label, variable, tooltip_key, tooltip_key, min_value=min_value, max_value=max_value)
-        dpg.add_text("On Error")
-        self._add_combo("##on_error", self.on_error, ["skip", "fail"], "on_error", width=-1)
+        DetectionSettingsPanel(self).build()
 
     def _build_output_settings(self) -> None:
-        self._add_checkbox("Pack atlases", self.pack_atlases, "pack_atlases")
-        self._add_input_int("Atlas Size", self.atlas_size, "atlas_size", "atlas_size", min_value=64, max_value=16384)
-        self._add_input_int("Padding", self.atlas_padding, "atlas_padding", "atlas_padding", min_value=0, max_value=128)
-        self._add_checkbox("Allow rotation", self.atlas_allow_rotation, "atlas_allow_rotation")
-        dpg.add_text("Exports")
-        attach_tooltip(dpg.last_item(), "engine_exports")
-        self._add_checkbox("Unity", self.export_unity, "export_unity")
-        self._add_checkbox("Godot", self.export_godot, "export_godot")
-        self._add_checkbox("Unreal", self.export_unreal, "export_unreal")
-        dpg.add_spacer(height=10)
-        self._add_button("Save Preset", self.save_preset, "save_preset", width=-1)
-        self._add_button("Load Preset", self.load_preset, "load_preset", width=-1)
+        OutputSettingsPanel(self).build()
 
     def _build_review_settings(self) -> None:
-        with dpg.group(horizontal=True):
-            self._add_button("Load Project", self.load_project_dialog, "load_project")
-            self._add_button("Save Project", self.save_project_dialog, "save_project")
-        with dpg.group(horizontal=True):
-            self._add_button("Undo", self.undo_project_edit, "undo")
-            self._add_button("Redo", self.redo_project_edit, "redo")
-        self._add_button("Apply Outputs", self.apply_project_outputs, "apply_outputs", width=-1)
-        dpg.add_text("Filter")
-        with dpg.group(horizontal=True):
-            self._add_combo("##review_filter", self.review_status_filter, ["all", "needs_review", "approved", "rejected"], "review_filter", width=120, callback=lambda *_args: self.refresh_project_rows())
-            self._add_input_text("##review_query", self.review_query, "review_query", "review_query", width=145, callback=lambda *_args: self.refresh_project_rows())
-        with dpg.child_window(tag="review_list_panel", width=-1, height=130, border=True):
-            pass
-        attach_tooltip("review_list_panel", "review_list")
-        self._review_list = DpgSelectableList("review_list_panel", multi=True, on_select=self.populate_review_editor)
-        with dpg.child_window(tag="review_image_panel", width=-1, height=140, border=True):
-            dpg.add_text("Load a project to review sprites.", wrap=260)
-        with dpg.group(tag="review_source_canvas_frame"):
-            dpg.add_drawlist(tag="review_source_canvas", width=REVIEW_CANVAS_SIZE[0], height=REVIEW_CANVAS_SIZE[1])
-        attach_tooltip("review_source_canvas_frame", "review_source_canvas")
-        with dpg.item_handler_registry(tag="review_canvas_handlers"):
-            dpg.add_item_clicked_handler(callback=self._on_review_canvas_press)
-        dpg.bind_item_handler_registry("review_source_canvas", "review_canvas_handlers")
-        dpg.add_text("Animation Clip")
-        self._add_combo("##animation_clip", self.review_animation_clip, [], "animation_clip", tag="review_animation_combo", width=-1)
-        with dpg.group(horizontal=True):
-            self._add_button("Play", self.play_review_animation, "play_animation")
-            self._add_button("Stop", self.stop_review_animation, "stop_animation")
-        dpg.add_text("Name")
-        self._add_input_text("##review_name", self.review_name, "review_name", "review_name", width=-1)
-        dpg.add_text("Category")
-        self._add_input_text("##review_category", self.review_category, "review_category", "review_category", width=-1)
-        dpg.add_text("BBox x/y/w/h")
-        with dpg.group(horizontal=True):
-            self._add_input_text("##review_bbox_x", self.review_bbox_x, "review_bbox_x", "review_bbox", width=58)
-            self._add_input_text("##review_bbox_y", self.review_bbox_y, "review_bbox_y", "review_bbox", width=58)
-            self._add_input_text("##review_bbox_width", self.review_bbox_width, "review_bbox_width", "review_bbox", width=58)
-            self._add_input_text("##review_bbox_height", self.review_bbox_height, "review_bbox_height", "review_bbox", width=58)
-        dpg.add_text("Pivot x/y")
-        with dpg.group(horizontal=True):
-            self._add_input_text("##review_pivot_x", self.review_pivot_x, "review_pivot_x", "review_pivot", width=100)
-            self._add_input_text("##review_pivot_y", self.review_pivot_y, "review_pivot_y", "review_pivot", width=100)
-        dpg.add_text("Status / Flags")
-        with dpg.group(horizontal=True):
-            self._add_combo("##review_status", self.review_status, ["needs_review", "approved", "rejected"], "review_status", width=120)
-            self._add_input_text("##review_flags", self.review_flags, "review_flags", "review_flags", width=130)
-        self._add_button("Apply Edit", self.apply_review_edit, "apply_edit", width=-1)
-        with dpg.group(horizontal=True):
-            self._add_button("Approve", self.approve_review_sprite, "approve")
-            self._add_button("Reject", self.reject_review_sprite, "reject")
-        dpg.add_text("Split boxes")
-        self._add_input_text("##split_boxes", self.review_split_boxes, "split_boxes", "split_boxes", width=-1)
-        with dpg.group(horizontal=True):
-            self._add_button("Split Selected", self.split_review_sprite, "split_selected")
-            self._add_button("Merge Selected", self.merge_review_sprites, "merge_selected")
+        ReviewSettingsPanel(self).build()
 
     def _build_studio_settings(self) -> None:
-        with dpg.group(horizontal=True):
-            self._add_button("Refresh", self.refresh_studio_panel, "studio_refresh")
-            self._add_button("Review + Apply", self.review_apply_studio_project, "studio_review_apply")
-        with dpg.group(horizontal=True):
-            self._add_button("Auto Name", self.auto_name_studio_project, "studio_auto_name")
-            self._add_button("Profiles", self.generate_studio_profiles, "studio_generate_profiles")
-        with dpg.group(horizontal=True):
-            self._add_button("Diff Project", self.diff_studio_project, "studio_diff_project")
-            self._add_button("Train Preset", self.train_studio_preset, "studio_train_preset")
-        dpg.add_text("Taxonomy Pattern")
-        self._add_input_text("##studio_taxonomy_pattern", self.studio_taxonomy_pattern, "studio_taxonomy_pattern", "studio_taxonomy_pattern", width=-1)
-        dpg.add_text("Dashboard")
-        dpg.add_text("Load a project to build a studio dashboard.", tag="studio_dashboard_label", wrap=260)
-        attach_tooltip("studio_dashboard_label", "studio_dashboard")
-        dpg.add_text("Review Queue")
-        with dpg.child_window(tag="studio_queue_panel", width=-1, height=100, border=True):
-            pass
-        attach_tooltip("studio_queue_panel", "studio_queue")
-        self._studio_queue_list = DpgSelectableList("studio_queue_panel")
-        dpg.add_text("Asset Browser")
-        with dpg.group(horizontal=True):
-            self._add_combo("##studio_status_filter", self.studio_status_filter, ["all", "needs_review", "approved", "rejected"], "studio_asset_query", width=120, callback=lambda *_args: self.refresh_studio_panel())
-            self._add_input_text("##studio_query", self.studio_query, "studio_query", "studio_asset_query", width=130, callback=lambda *_args: self.refresh_studio_panel())
-        with dpg.child_window(tag="studio_asset_panel", width=-1, height=140, border=True):
-            pass
-        attach_tooltip("studio_asset_panel", "studio_asset_list")
-        self._studio_asset_list = DpgSelectableList("studio_asset_panel")
+        StudioSettingsPanel(self).build()
 
     def _build_editor_settings(self) -> None:
-        with dpg.group(horizontal=True):
-            self._add_button("Load Sprite", self.load_editor_sprite_dialog, "editor_load_sprite")
-            self._add_button("Save Package", self.save_editor_package, "editor_save_package")
-        with dpg.child_window(tag="editor_preview_panel", width=-1, height=145, border=True):
-            dpg.add_text("Load a sprite to edit.", wrap=260)
-        dpg.add_text("Palette: none", tag="editor_palette_label", wrap=260)
-        attach_tooltip("editor_palette_label", "editor_palette_summary")
-        dpg.add_text("Palette Swap")
-        with dpg.group(horizontal=True):
-            self._add_input_text("##editor_source_color", self.editor_source_color, "editor_source_color", "editor_source_color", width=120)
-            self._add_input_text("##editor_target_color", self.editor_target_color, "editor_target_color", "editor_target_color", width=120)
-        self._add_button("Swap", self.apply_editor_palette_swap, "editor_swap_colors", width=-1)
-        dpg.add_text("Color Wheel")
-        with dpg.group(horizontal=True):
-            self._add_combo("##editor_harmony", self.editor_harmony, ["complementary", "analogous", "triadic", "tetradic"], "editor_color_wheel", width=135)
-            self._add_input_text("##editor_hue_degrees", self.editor_hue_degrees, "editor_hue_degrees", "editor_hue_degrees", width=100)
-        with dpg.group(horizontal=True):
-            self._add_button("Hue Shift", self.apply_editor_hue_shift, "editor_hue_shift")
-            self._add_button("Wheel", self.preview_editor_color_wheel, "editor_color_wheel")
-        dpg.add_text("Auto-Tile")
-        with dpg.group(horizontal=True):
-            self._add_input_text("##editor_autotile_name", self.editor_autotile_name, "editor_autotile_name", "editor_autotile_name", width=135)
-            self._add_combo("##editor_engine", self.editor_engine, ["generic", "unity", "godot", "unreal"], "engine_exports", width=100)
-        self._add_button("Generate Auto-Tile", self.generate_editor_autotile, "editor_generate_autotile", width=-1)
-        self._add_button("IDE Actions", self.show_editor_ide_actions, "editor_ide_api", width=-1)
+        EditorSettingsPanel(self).build()
 
     def _value_callback(self, _sender: object, app_data: object, user_data: object) -> None:
         if isinstance(user_data, DpgValue):
@@ -1523,7 +1645,7 @@ class SpriteSheetToolUi:
         if path is not None and action is not None:
             action(path)
 
-    def apply_editor_palette_swap(self, *_args: object) -> None:
+    def _apply_editor_palette_swap_impl(self, *_args: object) -> None:
         if self.editor_session is None:
             self._show_info("Palette Swap", "Load a sprite before swapping colors.")
             return
@@ -1536,7 +1658,7 @@ class SpriteSheetToolUi:
         except Exception as exc:
             self._show_error("Palette Swap", str(exc))
 
-    def apply_editor_hue_shift(self, *_args: object) -> None:
+    def _apply_editor_hue_shift_impl(self, *_args: object) -> None:
         if self.editor_session is None:
             self._show_info("Hue Shift", "Load a sprite before applying hue shifts.")
             return
@@ -1582,7 +1704,7 @@ class SpriteSheetToolUi:
         actions = ", ".join(editor_callable_actions())
         self._show_info("IDE API", "Use tools\\sprite_ide_api.py with --request request.json.\n\n" f"Actions: {actions}")
 
-    def refresh_studio_panel(self, *_args: object) -> None:
+    def _refresh_studio_panel_impl(self, *_args: object) -> None:
         if self._studio_queue_list is not None:
             self._studio_queue_list.clear()
         if self._studio_asset_list is not None:
@@ -1690,7 +1812,7 @@ class SpriteSheetToolUi:
         except Exception as exc:
             self._show_error("Review + Apply", str(exc))
 
-    def refresh_project_rows(self, *_args: object) -> None:
+    def _refresh_project_rows_impl(self, *_args: object) -> None:
         if self._review_list is not None:
             self._review_list.clear()
         self.project_sprite_rows_cache = []
@@ -2036,7 +2158,7 @@ class SpriteSheetToolUi:
         except Exception as exc:
             self._show_error("Merge Sprites", str(exc))
 
-    def process(self, *_args: object) -> None:
+    def _process_impl(self, *_args: object) -> None:
         if self.worker and self.worker.is_alive():
             self._show_info("Processing", "A processing run is already active.")
             return

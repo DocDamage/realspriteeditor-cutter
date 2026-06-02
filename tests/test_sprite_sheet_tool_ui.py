@@ -12,8 +12,21 @@ from PIL import Image
 
 import tools.sprite_sheet_tool_ui as ui_module
 from tools.sprite_sheet_tool_ui import (
+    CenterPreviewPanel,
     CutterUiSettings,
+    DetectionSettingsPanel,
+    EditorSettingsPanel,
+    LeftInputPanel,
+    OutputSettingsPanel,
+    ProcessingController,
+    ReviewSettingsPanel,
+    ReviewProjectController,
+    RunSettingsPanel,
     SpriteSheetToolUi,
+    SettingsTabsPanel,
+    StudioSettingsPanel,
+    StudioController,
+    SpriteEditorController,
     TOOLTIP_TEXT,
     builtin_preset_names,
     build_cutter_command,
@@ -97,6 +110,36 @@ def sample_project() -> dict[str, object]:
 
 
 class SpriteSheetToolUiTests(unittest.TestCase):
+    def test_ui_construction_is_split_into_panel_builders(self) -> None:
+        app = SpriteSheetToolUi(build=False)
+
+        panel_names = [type(panel).__name__ for panel in app._panel_builders()]
+
+        self.assertEqual(panel_names, ["LeftInputPanel", "CenterPreviewPanel", "SettingsTabsPanel"])
+        for panel_type in [
+            LeftInputPanel,
+            CenterPreviewPanel,
+            SettingsTabsPanel,
+            RunSettingsPanel,
+            DetectionSettingsPanel,
+            OutputSettingsPanel,
+            ReviewSettingsPanel,
+            StudioSettingsPanel,
+            EditorSettingsPanel,
+        ]:
+            self.assertTrue(callable(getattr(panel_type(app), "build")))
+
+    def test_ui_behavior_is_split_into_controller_helpers(self) -> None:
+        app = SpriteSheetToolUi(build=False)
+
+        controller_names = [type(controller).__name__ for controller in app._controllers()]
+
+        self.assertEqual(controller_names, ["ProcessingController", "ReviewProjectController", "StudioController", "SpriteEditorController"])
+        self.assertIsInstance(app.processing_controller, ProcessingController)
+        self.assertIsInstance(app.review_controller, ReviewProjectController)
+        self.assertIsInstance(app.studio_controller, StudioController)
+        self.assertIsInstance(app.editor_controller, SpriteEditorController)
+
     @unittest.skipUnless(
         ui_module.dpg is not None and sys.platform.startswith("win"),
         "Dear PyGUI construction smoke test requires the optional Windows UI dependency",

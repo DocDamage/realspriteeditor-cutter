@@ -77,7 +77,7 @@ Before claiming success, run relevant targeted tests plus the full suite when be
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py"
-python -m py_compile tools\cut_tileset_sprites.py tools\sprite_sheet_tool_ui.py tools\sprite_project.py tools\sprite_studio.py tools\sprite_editor.py tools\autotile_tools.py tools\sprite_ide_api.py tools\golden_sprite_fixtures.py
+python -m py_compile tools\cut_tileset_sprites.py tools\sprite_processing.py tools\sprite_atlas.py tools\sprite_manifest.py tools\sprite_reports.py tools\sprite_sheet_tool_ui.py tools\sprite_project.py tools\sprite_studio.py tools\sprite_editor.py tools\autotile_tools.py tools\sprite_ide_api.py tools\golden_sprite_fixtures.py
 python tools\sync_spritecut_skills.py --check
 python tools\sprite_sheet_tool_ui.py --help
 python tools\sprite_ide_api.py --help

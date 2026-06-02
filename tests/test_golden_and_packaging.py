@@ -99,6 +99,8 @@ class GoldenAndPackagingTests(unittest.TestCase):
             self.assertTrue((target / "launch_sprite_tool.bat").exists())
             self.assertTrue((target / "requirements-ui.txt").exists())
             self.assertTrue((target / "requirements-dev.txt").exists())
+            self.assertTrue((target / "requirements-mcp.txt").exists())
+            self.assertTrue((target / "tools" / "sprite_mcp_server.py").exists())
             self.assertTrue((target / "skills" / "codex" / "spritecut-pipeline" / "SKILL.md").exists())
 
     def test_github_workflows_run_tests_compile_and_release_packaging(self) -> None:
@@ -123,6 +125,18 @@ class GoldenAndPackagingTests(unittest.TestCase):
         text = requirements.read_text(encoding="utf-8").lower()
         self.assertIn("pillow", text)
         self.assertIn("numpy", text)
+
+    def test_mcp_requirements_and_readme_document_ide_server(self) -> None:
+        requirements = REPO_ROOT / "requirements-mcp.txt"
+        readme = REPO_ROOT / "README.md"
+
+        self.assertTrue(requirements.exists(), str(requirements))
+        self.assertIn("mcp[cli]", requirements.read_text(encoding="utf-8").lower())
+
+        text = readme.read_text(encoding="utf-8")
+        self.assertIn("SpriteCut MCP Server", text)
+        self.assertIn("tools\\sprite_mcp_server.py", text)
+        self.assertIn("requirements-mcp.txt", text)
 
 
 if __name__ == "__main__":

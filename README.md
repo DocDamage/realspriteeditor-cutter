@@ -64,6 +64,24 @@ python tools\sprite_ide_api.py --json "{""action"":""palette.extract"",""input""
 Supported IDE actions are `sprite.edit`, `sprite.batch_edit`, `palette.extract`, `palette.swap`, `palette.hue_shift`, `palette.variants`, and `autotile.generate`.
 When using `--request`, relative `input`, `output`, `output_dir`, `package_dir`, and `inputs` paths resolve from the request file's directory.
 
+## SpriteCut MCP Server
+
+MCP-aware IDEs and agents can use SpriteCut through a local stdio MCP server instead of writing JSON requests by hand.
+
+Install the optional MCP dependency:
+
+```powershell
+python -m pip install -r requirements-mcp.txt
+```
+
+Configure your MCP client to launch:
+
+```powershell
+python tools\sprite_mcp_server.py
+```
+
+The server exposes `palette_extract`, `palette_swap`, `palette_hue_shift`, `palette_variants`, `sprite_edit`, `sprite_batch_edit`, and `autotile_generate`. These MCP tools call the same backend as `tools\sprite_ide_api.py`, so CLI and MCP behavior stay aligned.
+
 ## Agent Skills
 
 This repo includes a reusable SpriteCut skill pack for both Codex and Claude:
@@ -155,5 +173,5 @@ This writes edited PNGs, `batch_edit_manifest.json`, and `batch_edit_contact.png
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py"
-python -m py_compile tools\cut_tileset_sprites.py tools\sprite_processing.py tools\sprite_atlas.py tools\sprite_manifest.py tools\sprite_reports.py tools\sprite_sheet_tool_ui.py tools\sprite_project.py tools\sprite_studio.py tools\sprite_editor.py tools\autotile_tools.py tools\sprite_ide_api.py tools\golden_sprite_fixtures.py
+python -m py_compile tools\cut_tileset_sprites.py tools\sprite_processing.py tools\sprite_atlas.py tools\sprite_manifest.py tools\sprite_reports.py tools\sprite_sheet_tool_ui.py tools\sprite_project.py tools\sprite_studio.py tools\sprite_editor.py tools\autotile_tools.py tools\sprite_ide_api.py tools\golden_sprite_fixtures.py tools\sprite_mcp_server.py
 ```

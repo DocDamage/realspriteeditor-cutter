@@ -30,6 +30,14 @@ Scale a batch safely:
 python tools\cut_tileset_sprites.py "G:\path\to\sheets" --workers 4 --max-image-megapixels 80 --resume
 ```
 
+Process asset packs that contain ZIP files:
+
+```powershell
+python tools\cut_tileset_sprites.py "G:\path\to\asset-library" --include-archives --out-name _organized_sprites
+```
+
+You can also pass a `.zip` file directly with `--include-archives`. Extracted source sheets are kept under the run output folder in `_extracted_archives` so review/apply workflows can still find the original sheets.
+
 ## Built-In Presets
 
 - `pixel_tileset_white_bg`
@@ -80,7 +88,7 @@ Configure your MCP client to launch:
 python tools\sprite_mcp_server.py
 ```
 
-The server exposes editor tools (`palette_extract`, `palette_swap`, `palette_hue_shift`, `palette_variants`, `sprite_edit`, `sprite_batch_edit`, `autotile_generate`), setup helpers (`mcp_health_check`, `mcp_client_config`), and production workflow tools (`create_sample_pack`, `process_sheets`, `load_project_summary`, `review_dashboard`, `apply_project_outputs`, `review_and_apply_project`, `generate_import_plans`).
+The server exposes editor tools (`palette_extract`, `palette_swap`, `palette_hue_shift`, `palette_variants`, `sprite_edit`, `sprite_batch_edit`, `autotile_generate`), setup helpers (`mcp_health_check`, `mcp_client_config`), and production workflow tools (`create_sample_pack`, `process_sheets`, `load_project_summary`, `review_dashboard`, `apply_project_outputs`, `review_and_apply_project`, `generate_import_plans`). Use `include_archives=true` on `process_sheets` for ZIP-heavy asset libraries.
 
 It also gives agents context resources:
 

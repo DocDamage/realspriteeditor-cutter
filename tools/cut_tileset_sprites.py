@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ MIN_WIDTH = 3
 MIN_HEIGHT = 3
 PADDING = 1
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
+SUPPORTED_ARCHIVE_EXTENSIONS = {".zip"}
 BUILT_IN_PRESETS: dict[str, dict[str, object]] = {
     "pixel_tileset_white_bg": {
         "mode": "tileset",
@@ -174,6 +176,7 @@ class RunOptions:
     workers: int
     max_image_megapixels: float
     resume: bool
+    include_archives: bool
     auto_detect_all: bool
     auto_profile: dict[str, object]
 
@@ -209,17 +212,82 @@ def is_inside_spritecut_output(path: Path, root: Path) -> bool:
         current = current.parent
 
 
-def discover_sheet_files(input_path: Path) -> list[Path]:
+def _safe_extract_relative_path(raw_name: str) -> Path | None:
+    normalized = raw_name.replace("\\", "/")
+    if normalized.startswith("/") or normalized.startswith("../") or "/../" in normalized:
+        return None
+    relative = Path(normalized)
+    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        return None
+    return relative
+
+
+def _safe_archive_folder_name(path: Path) -> str:
+    name = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("._")
+    return name or "archive"
+
+
+def extract_archive_sheet_files(archive_path: Path, destination_root: Path) -> list[Path]:
+    if archive_path.suffix.lower() not in SUPPORTED_ARCHIVE_EXTENSIONS:
+        return []
+
+    output_root = destination_root / _safe_archive_folder_name(archive_path)
+    extracted: list[Path] = []
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            for member in archive.infolist():
+                relative = _safe_extract_relative_path(member.filename)
+                if relative is None or member.is_dir() or relative.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+                    continue
+                target = output_root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member) as source, target.open("wb") as handle:
+                    handle.write(source.read())
+                extracted.append(target)
+    except zipfile.BadZipFile:
+        return []
+
+    return sorted(extracted, key=lambda path: natural_key(str(path.relative_to(output_root))))
+
+
+def _sheet_sort_key(path: Path, root: Path) -> list[object]:
+    try:
+        return natural_key(str(path.relative_to(root)))
+    except ValueError:
+        return natural_key(str(path))
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def discover_sheet_files(input_path: Path, *, include_archives: bool = False, archive_extract_dir: Path | None = None) -> list[Path]:
     if input_path.is_file():
-        return [input_path] if input_path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS else []
+        if input_path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS:
+            return [input_path]
+        if include_archives and archive_extract_dir is not None:
+            return extract_archive_sheet_files(input_path, archive_extract_dir)
+        return []
 
     sheets: list[Path] = []
     for path in input_path.rglob("*"):
+        if archive_extract_dir is not None and _is_relative_to(path, archive_extract_dir):
+            continue
         if is_generated_output_path(path) or is_inside_spritecut_output(path, input_path):
             continue
-        if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS:
+        if not path.is_file():
+            continue
+        if path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS:
             sheets.append(path)
-    return sorted(sheets, key=lambda path: natural_key(str(path.relative_to(input_path))))
+        elif include_archives and archive_extract_dir is not None and path.suffix.lower() in SUPPORTED_ARCHIVE_EXTENSIONS:
+            relative = path.relative_to(input_path).with_suffix("")
+            archive_destination = archive_extract_dir / relative.parent
+            sheets.extend(extract_archive_sheet_files(path, archive_destination))
+    return sorted(sheets, key=lambda path: _sheet_sort_key(path, input_path))
 
 
 def load_config_defaults(config_path: Path | None, preset_name: str | None = None) -> dict[str, object]:
@@ -1199,6 +1267,12 @@ def build_arg_parser(config_defaults: dict[str, object] | None = None, pre_parse
         default=bool(defaults.get("resume", False)),
         help="Reuse an existing --out-name folder and skip sheets already present in its manifest.",
     )
+    parser.add_argument(
+        "--include-archives",
+        action="store_true",
+        default=bool(defaults.get("include_archives", False)),
+        help="Extract supported image files from .zip archives found in the input folder, or process a .zip input directly.",
+    )
     return parser
 
 
@@ -1230,6 +1304,7 @@ def options_from_args(args: argparse.Namespace, auto_profile: dict[str, object] 
         workers=max(1, args.workers),
         max_image_megapixels=max(0.0, float(args.max_image_megapixels)),
         resume=args.resume,
+        include_archives=bool(args.include_archives),
         auto_detect_all=args.auto_detect_all,
         auto_profile=auto_profile or {},
     )
@@ -1319,7 +1394,12 @@ def run_from_args(args: argparse.Namespace, config_defaults: dict[str, object], 
     if not input_path.exists():
         raise SystemExit(f"Missing input: {input_path}")
 
-    sheets = discover_sheet_files(input_path)
+    output_base = input_path.parent if input_path.is_file() else input_path
+    preferred_out_dir = output_base / args.out_name
+    out_dir = preferred_out_dir if args.resume and preferred_out_dir.exists() else unique_output_dir(output_base, args.out_name)
+    archive_extract_dir = out_dir / "_extracted_archives"
+
+    sheets = discover_sheet_files(input_path, include_archives=args.include_archives, archive_extract_dir=archive_extract_dir)
     if not sheets:
         raise SystemExit(f"No supported image sheets found in {input_path}")
 
@@ -1328,9 +1408,6 @@ def run_from_args(args: argparse.Namespace, config_defaults: dict[str, object], 
         auto_profile = infer_auto_defaults(sheets)
         apply_auto_defaults(args, auto_profile, config_defaults, raw_argv)
 
-    output_base = input_path.parent if input_path.is_file() else input_path
-    preferred_out_dir = output_base / args.out_name
-    out_dir = preferred_out_dir if args.resume and preferred_out_dir.exists() else unique_output_dir(output_base, args.out_name)
     preview_dir = out_dir / "previews"
     manifest_dir = out_dir / "manifest"
     preview_dir.mkdir(parents=True, exist_ok=True)

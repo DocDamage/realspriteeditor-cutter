@@ -27,6 +27,12 @@ Cut a folder or single image with automatic detection:
 python tools\cut_tileset_sprites.py "G:\path\to\sheets" --out-name _organized_sprites --auto-detect-all
 ```
 
+Cut a ZIP-heavy asset library or a direct `.zip` input:
+
+```powershell
+python tools\cut_tileset_sprites.py "G:\path\to\asset-library" --include-archives --out-name _organized_sprites --auto-detect-all
+```
+
 List repeatable studio presets:
 
 ```powershell

@@ -193,6 +193,7 @@ def process_sheets(
     workers: int = 1,
     max_image_megapixels: float = 80.0,
     resume: bool = False,
+    include_archives: bool = False,
 ) -> dict[str, Any]:
     """Run the SpriteCut cutter on a folder or sheet and return generated paths."""
     argv = [input_path, "--out-name", out_name, "--workers", str(workers), "--max-image-megapixels", str(max_image_megapixels)]
@@ -202,6 +203,8 @@ def process_sheets(
         argv.append("--auto-detect-all")
     if resume:
         argv.append("--resume")
+    if include_archives:
+        argv.append("--include-archives")
 
     stdout = io.StringIO()
     stderr = io.StringIO()

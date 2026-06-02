@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -290,6 +291,38 @@ class CutTilesetSpritesTests(unittest.TestCase):
             sheets = discover_sheet_files(root)
 
             self.assertEqual([path.name for path in sheets], ["props.png"])
+
+    def test_discovery_extracts_images_from_zip_archives_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_source = root / "source.png"
+            make_varied_tileset_sheet(archive_source)
+            archive = root / "packs" / "props.zip"
+            archive.parent.mkdir()
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as handle:
+                handle.write(archive_source, "nested/props.png")
+            archive_source.unlink()
+
+            sheets = discover_sheet_files(root, include_archives=True, archive_extract_dir=root / "out" / "_extracted_archives")
+
+            self.assertEqual([path.name for path in sheets], ["props.png"])
+            self.assertTrue((root / "out" / "_extracted_archives" / "packs" / "props" / "nested" / "props.png").exists())
+
+    def test_discovery_rejects_unsafe_zip_member_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_source = root / "safe.png"
+            make_varied_tileset_sheet(archive_source)
+            archive = root / "unsafe.zip"
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as handle:
+                handle.write(archive_source, "../escape.png")
+                handle.write(archive_source, "safe.png")
+            archive_source.unlink()
+
+            sheets = discover_sheet_files(archive, include_archives=True, archive_extract_dir=root / "out" / "_extracted_archives")
+
+            self.assertEqual([path.name for path in sheets], ["safe.png"])
+            self.assertFalse((root / "out" / "escape.png").exists())
 
     def test_auto_mode_does_not_treat_one_uniform_prop_row_as_animation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -618,6 +651,25 @@ class CutTilesetSpritesTests(unittest.TestCase):
             with (root / "out" / "manifest" / "settings.json").open(encoding="utf-8") as handle:
                 settings = json.load(handle)
             self.assertTrue(settings["resume"])
+
+    def test_cli_processes_direct_zip_input_when_archives_are_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sheet = root / "props.png"
+            make_border_and_color_sheet(sheet)
+            archive = root / "props_pack.zip"
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as handle:
+                handle.write(sheet, "props.png")
+            sheet.unlink()
+
+            result = run_cutter(archive, "--include-archives", "--mode", "tileset", "--out-name", "out")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / "out" / "_extracted_archives" / "props_pack" / "props.png").exists())
+            with (root / "out" / "manifest" / "sprites.json").open(encoding="utf-8") as handle:
+                records = json.load(handle)
+            self.assertGreater(len(records), 0)
+            self.assertIn("_extracted_archives", records[0]["source_file"])
 
     def test_load_existing_records_ignores_unknown_manifest_fields_for_resume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

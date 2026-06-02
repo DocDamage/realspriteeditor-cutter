@@ -123,6 +123,7 @@ Use `tools/golden_sprite_fixtures.py` helpers to create repeatable synthetic pac
 
 Use `--workers` for batch throughput and `--max-image-megapixels` as a memory guard for oversized sheets. Use `--on-error skip` for production batches where one bad sheet should not stop the whole run.
 Use `--resume` to reuse an existing output folder and skip source sheets already represented in the manifest.
+Use `--include-archives` when source folders contain `.zip` asset packs, or when processing a `.zip` file directly. Extracted images are kept in `_extracted_archives` inside the run output folder.
 When scanning a folder, both the CLI and UI skip prior SpriteCut output trees identified by `project.spritecut.json` or `manifest/sprites.json`, including custom-named output folders.
 
 ## Visual Regression

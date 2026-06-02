@@ -246,6 +246,7 @@ class SpriteSheetToolUiTests(unittest.TestCase):
         settings = CutterUiSettings(
             input_path=Path("G:/assets/sheets"),
             auto_detect_all=False,
+            include_archives=True,
             out_name="_ui_output",
             mode="animation",
             animation_names="idle,run",
@@ -288,14 +289,16 @@ class SpriteSheetToolUiTests(unittest.TestCase):
         self.assertIn("100", command)
         self.assertIn("--on-error", command)
         self.assertIn("fail", command)
+        self.assertIn("--include-archives", command)
         self.assertEqual(command[-1].replace("/", "\\"), "G:\\assets\\sheets")
 
     def test_build_cutter_command_uses_minimal_auto_detect_all_command_by_default(self) -> None:
-        settings = CutterUiSettings(input_path=Path("G:/assets/sheets"))
+        settings = CutterUiSettings(input_path=Path("G:/assets/sheets"), include_archives=True)
 
         command = build_cutter_command(settings, python_executable="python")
 
         self.assertIn("--auto-detect-all", command)
+        self.assertIn("--include-archives", command)
         self.assertNotIn("--alpha-threshold", command)
         self.assertNotIn("--engine-exports", command)
         self.assertNotIn("--pack-atlases", command)
@@ -315,6 +318,7 @@ class SpriteSheetToolUiTests(unittest.TestCase):
             "open_report",
             "open_project",
             "auto_detect_all",
+            "include_archives",
             "mode",
             "animation_names",
             "alpha_threshold",
@@ -478,6 +482,7 @@ class SpriteSheetToolUiTests(unittest.TestCase):
         settings = CutterUiSettings(
             input_path=Path("G:/assets/sheets"),
             auto_detect_all=False,
+            include_archives=True,
             out_name="custom_out",
             mode="tileset",
             pack_atlases=True,
@@ -493,6 +498,7 @@ class SpriteSheetToolUiTests(unittest.TestCase):
         self.assertNotIn("input_path", preset)
         self.assertEqual(restored.input_path, Path("D:/other"))
         self.assertEqual(restored.out_name, "custom_out")
+        self.assertTrue(restored.include_archives)
         self.assertTrue(restored.pack_atlases)
         self.assertEqual(restored.engine_exports, ["unity", "unreal"])
         self.assertEqual(restored.min_sprite_pixels, 88)

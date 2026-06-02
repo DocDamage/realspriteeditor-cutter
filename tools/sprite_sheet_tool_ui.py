@@ -63,6 +63,7 @@ TOOLTIP_TEXT: dict[str, str] = {
     "open_project": "Load the latest generated project file into the Review tab.",
     "out_name": "Name of the output folder created next to the selected input.",
     "auto_detect_all": "Let the tool infer backgrounds, thresholds, atlases, exports, workers, and animation FPS from the source art.",
+    "include_archives": "Process supported images found inside .zip asset packs. Extracted sources are kept inside the output folder for review.",
     "builtin_preset": "Optional fixed recipe for repeatable batches. Auto detect all is usually the best first pass.",
     "apply_preset": "Apply the selected preset to the visible settings controls.",
     "mode": "Auto chooses animation rows or tileset crops per sheet. Use fixed modes only for strict batches.",
@@ -160,6 +161,7 @@ def tooltip_text(key: str) -> str:
 class CutterUiSettings:
     input_path: Path
     auto_detect_all: bool = True
+    include_archives: bool = False
     out_name: str = "_organized_sprites"
     mode: str = "auto"
     animation_names: str = ""
@@ -214,6 +216,8 @@ def build_cutter_command(settings: CutterUiSettings, python_executable: str = sy
 
     if settings.auto_detect_all:
         command.append("--auto-detect-all")
+        if settings.include_archives:
+            command.append("--include-archives")
         if settings.animation_names.strip():
             command.extend(["--animation-names", settings.animation_names.strip()])
         command.append(str(settings.input_path))
@@ -255,6 +259,8 @@ def build_cutter_command(settings: CutterUiSettings, python_executable: str = sy
 
     if settings.animation_names.strip():
         command.extend(["--animation-names", settings.animation_names.strip()])
+    if settings.include_archives:
+        command.append("--include-archives")
     if settings.pivot_debug:
         command.append("--pivot-debug")
     if settings.pack_atlases:
@@ -272,6 +278,7 @@ def settings_to_preset_dict(settings: CutterUiSettings) -> dict[str, object]:
     return {
         "out_name": settings.out_name,
         "auto_detect_all": settings.auto_detect_all,
+        "include_archives": settings.include_archives,
         "mode": settings.mode,
         "animation_names": settings.animation_names,
         "animation_frame_mode": settings.animation_frame_mode,
@@ -308,6 +315,7 @@ def settings_from_preset_dict(data: dict[str, object], input_path: Path) -> Cutt
     return CutterUiSettings(
         input_path=input_path,
         auto_detect_all=bool(data.get("auto_detect_all", False)),
+        include_archives=bool(data.get("include_archives", False)),
         out_name=str(data.get("out_name", "_organized_sprites")),
         mode=str(data.get("mode", "auto")),
         animation_names=str(data.get("animation_names", "")),
@@ -937,6 +945,7 @@ class RunSettingsPanel(SpriteToolPanel):
         dpg.add_text("Output")
         app._add_input_text("##out_name", app.out_name, "out_name", "out_name", width=-1)
         app._add_checkbox("Auto detect all", app.auto_detect_all, "auto_detect_all")
+        app._add_checkbox("Include ZIP archives", app.include_archives, "include_archives")
         dpg.add_text("Built-In Preset")
         app._add_combo("##builtin_preset", app.builtin_preset, builtin_preset_names(), "builtin_preset", width=-1)
         app._add_button("Apply Preset", app.apply_builtin_preset, "apply_preset", width=-1)
@@ -1176,6 +1185,7 @@ class SpriteSheetToolUi:
     def __init__(self, *, build: bool = True) -> None:
         self.input_path = DpgValue("")
         self.auto_detect_all = DpgValue(True)
+        self.include_archives = DpgValue(False)
         self.out_name = DpgValue("_organized_sprites")
         self.mode = DpgValue("auto")
         self.animation_names = DpgValue("")
@@ -1604,6 +1614,7 @@ class SpriteSheetToolUi:
         return CutterUiSettings(
             input_path=Path(path_text),
             auto_detect_all=bool(self.auto_detect_all.get()),
+            include_archives=bool(self.include_archives.get()),
             out_name=str(self.out_name.get()).strip() or "_organized_sprites",
             mode=str(self.mode.get()),
             animation_names=str(self.animation_names.get()),
@@ -1630,6 +1641,7 @@ class SpriteSheetToolUi:
 
     def apply_settings(self, settings: CutterUiSettings) -> None:
         self.auto_detect_all.set(settings.auto_detect_all)
+        self.include_archives.set(settings.include_archives)
         self.out_name.set(settings.out_name)
         self.mode.set(settings.mode)
         self.animation_names.set(settings.animation_names)

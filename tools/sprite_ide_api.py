@@ -11,10 +11,12 @@ from PIL import Image
 try:
     from tools.autotile_tools import write_autotile_package
     from tools.sprite_editor import SpriteEditSession, apply_edit_operations, apply_hue_shift, apply_palette_swap, extract_palette, write_batch_edit_package, write_edit_package, write_palette_variant_package
+    from tools.sprite_project import attach_sprite_edit_output, load_project, save_project
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tools.autotile_tools import write_autotile_package
     from tools.sprite_editor import SpriteEditSession, apply_edit_operations, apply_hue_shift, apply_palette_swap, extract_palette, write_batch_edit_package, write_edit_package, write_palette_variant_package
+    from tools.sprite_project import attach_sprite_edit_output, load_project, save_project
 
 
 def _load_image(path: Path | str) -> Image.Image:
@@ -38,7 +40,7 @@ def _require_path(command: dict[str, Any], key: str) -> Path:
 
 def _resolve_relative_request_paths(command: dict[str, Any], base_dir: Path) -> dict[str, Any]:
     resolved = dict(command)
-    for key in ("input", "output", "output_dir", "package_dir"):
+    for key in ("input", "output", "output_dir", "package_dir", "project_path"):
         value = resolved.get(key)
         if isinstance(value, str) and value.strip():
             path = Path(value)
@@ -121,6 +123,35 @@ def run_ide_command(command: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("sprite.batch_edit requires operations to be a list.")
         package = write_batch_edit_package([Path(str(path)) for path in inputs], output_dir, operations=operations)
         return {"ok": True, "action": action, **package}
+
+    if action == "sprite.save_to_project":
+        project_path = _require_path(command, "project_path")
+        source = _require_path(command, "input")
+        sprite_id = str(command.get("sprite_id", "")).strip()
+        if not sprite_id:
+            raise ValueError("sprite.save_to_project requires sprite_id.")
+        operations = command.get("operations", [])
+        if not isinstance(operations, list):
+            raise ValueError("sprite.save_to_project requires operations to be a list.")
+        output_dir_text = str(command.get("output_dir", "")).strip()
+        output_dir = Path(output_dir_text) if output_dir_text else project_path.parent / "applied_project" / "sprites" / "edited"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{sprite_id}.png"
+        session = SpriteEditSession.open(source)
+        summary = apply_edit_operations(session, operations)
+        session.save(output_path)
+        project = load_project(project_path)
+        updated = attach_sprite_edit_output(project, sprite_id, str(output_path))
+        save_project(updated, project_path)
+        return {
+            "ok": True,
+            "action": action,
+            "project_path": str(project_path),
+            "sprite_id": sprite_id,
+            "input": str(source),
+            "output": str(output_path),
+            "summary": summary,
+        }
 
     if action == "palette.variants":
         source = _require_path(command, "input")

@@ -372,6 +372,21 @@ def apply_edit_operations(session: SpriteEditSession, operations: list[dict[str,
                 visible=bool(operation.get("visible", True)),
                 opacity=float(operation.get("opacity", 1.0)),
             )
+        elif tool == "select_layer":
+            session.select_layer(int(operation.get("index", 0)))
+        elif tool == "rename_layer":
+            session.rename_layer(int(operation.get("index", session.active_layer)), str(operation.get("name", "")).strip())
+        elif tool == "duplicate_layer":
+            name = operation.get("name")
+            session.duplicate_layer(int(operation.get("index", session.active_layer)), str(name).strip() if name else None)
+        elif tool == "delete_layer":
+            session.delete_layer(int(operation.get("index", session.active_layer)))
+        elif tool == "reorder_layer":
+            session.reorder_layer(int(operation.get("from_index", session.active_layer)), int(operation.get("to_index", session.active_layer)))
+        elif tool == "set_layer_visibility":
+            session.set_layer_visibility(int(operation.get("index", session.active_layer)), bool(operation.get("visible", True)))
+        elif tool == "set_layer_opacity":
+            session.set_layer_opacity(int(operation.get("index", session.active_layer)), float(operation.get("opacity", 1.0)))
         elif tool == "draw_pixel":
             session.draw_pixel(int(operation["x"]), int(operation["y"]), operation.get("color", "#000000"))
         elif tool == "draw_line":

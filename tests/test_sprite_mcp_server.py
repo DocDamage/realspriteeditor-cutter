@@ -36,6 +36,7 @@ from tools.sprite_mcp_server import (
     review_dashboard,
     review_sprite_project,
     sprite_edit,
+    sprite_save_to_project,
 )
 
 
@@ -113,6 +114,29 @@ class SpriteMcpServerTests(unittest.TestCase):
             self.assertTrue(edited.exists())
             with Image.open(swapped) as image:
                 self.assertEqual(image.getpixel((0, 0)), (0, 0, 255, 255))
+
+    def test_sprite_save_to_project_updates_project_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            project_path = root / "project.spritecut.json"
+            write_source(source)
+            project_path.write_text(
+                '{"schema_version": 1, "sprites": [{"id": "sprite_001", "review_status": "needs_review", "review_flags": []}]}',
+                encoding="utf-8",
+            )
+
+            result = sprite_save_to_project(
+                str(project_path),
+                "sprite_001",
+                str(source),
+                operations=[{"tool": "replace_color", "source": "#ff0000", "target": "#00ff00"}],
+            )
+
+            self.assertEqual(result["ok"], True)
+            self.assertTrue(Path(result["output"]).exists())
+            self.assertIn("sprite.save_to_project", read_actions_resource())
+            self.assertEqual(load_project_summary(str(project_path))["statuses"], {"approved": 1})
 
     def test_autotile_generate_writes_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

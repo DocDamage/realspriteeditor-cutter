@@ -33,6 +33,7 @@ MCP_TOOL_NAMES = [
     "palette_variants",
     "sprite_edit",
     "sprite_batch_edit",
+    "sprite_save_to_project",
     "autotile_generate",
     "create_sample_pack",
     "process_sheets",
@@ -73,6 +74,7 @@ def read_actions_resource() -> str:
             "- palette.variants -> palette_variants",
             "- sprite.edit -> sprite_edit",
             "- sprite.batch_edit -> sprite_batch_edit",
+            "- sprite.save_to_project -> sprite_save_to_project",
             "- autotile.generate -> autotile_generate",
             "- project processing -> process_sheets, review_dashboard, review_and_apply_project",
         ]
@@ -120,7 +122,7 @@ def generate_sprite_edit_request(input_path: str, edit_goal: str) -> str:
     return (
         f"Generate a sprite.edit JSON request for `{input_path}` to accomplish `{edit_goal}`. "
         "Use supported operations such as replace_color, crop, resize, flip, rotate_90, draw_line, "
-        "fill_rect, erase_rect, flood_fill, and hue_shift. Include output and package_dir paths."
+        "fill_rect, erase_rect, flood_fill, layer operations, and hue_shift. Include output and package_dir paths."
     )
 
 
@@ -379,6 +381,26 @@ def sprite_batch_edit(inputs: list[str], output_dir: str, operations: list[dict[
     )
 
 
+def sprite_save_to_project(
+    project_path: str,
+    sprite_id: str,
+    input: str,
+    operations: list[dict[str, Any]] | None = None,
+    output_dir: str = "",
+) -> dict[str, Any]:
+    """Edit one sprite image and attach the saved output back to a SpriteCut project."""
+    command: dict[str, Any] = {
+        "action": "sprite.save_to_project",
+        "project_path": project_path,
+        "sprite_id": sprite_id,
+        "input": input,
+        "operations": operations or [],
+    }
+    if output_dir:
+        command["output_dir"] = output_dir
+    return run_ide_command(command)
+
+
 def autotile_generate(input: str, output_dir: str, name: str = "", engine: str = "generic") -> dict[str, Any]:
     """Generate a 16-mask cardinal autotile sheet and engine rule metadata."""
     command: dict[str, Any] = {
@@ -410,6 +432,7 @@ def build_mcp_server(fast_mcp_factory: Callable[..., Any] | None = None) -> Any:
         palette_variants,
         sprite_edit,
         sprite_batch_edit,
+        sprite_save_to_project,
         autotile_generate,
         create_sample_pack,
         process_sheets,

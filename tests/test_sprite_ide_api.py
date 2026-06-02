@@ -98,6 +98,66 @@ class SpriteIdeApiTests(unittest.TestCase):
                 self.assertEqual(image.size, (8, 8))
                 self.assertEqual(image.getpixel((0, 0)), (0, 0, 255, 255))
 
+    def test_run_ide_command_dispatches_layer_operations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            package_dir = root / "package"
+            write_source(source)
+
+            result = run_ide_command(
+                {
+                    "action": "sprite.edit",
+                    "input": str(source),
+                    "package_dir": str(package_dir),
+                    "operations": [
+                        {"tool": "add_layer", "name": "paint"},
+                        {"tool": "rename_layer", "index": 1, "name": "details"},
+                        {"tool": "duplicate_layer", "index": 1, "name": "details_copy"},
+                        {"tool": "reorder_layer", "from_index": 2, "to_index": 0},
+                        {"tool": "set_layer_visibility", "index": 1, "visible": False},
+                        {"tool": "set_layer_opacity", "index": 0, "opacity": 0.5},
+                        {"tool": "select_layer", "index": 0},
+                    ],
+                }
+            )
+
+            self.assertEqual(result["ok"], True)
+            self.assertEqual(result["summary"]["applied"], 7)
+            self.assertEqual(result["summary"]["layers"], ["details_copy", "base", "details"])
+            manifest = json.loads(Path(result["package"]["manifest"]).read_text(encoding="utf-8"))
+            self.assertFalse(manifest["layers"][1]["visible"])
+            self.assertEqual(manifest["layers"][0]["opacity"], 0.5)
+
+    def test_run_ide_command_saves_sprite_edit_back_to_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            project_path = root / "project.spritecut.json"
+            write_source(source)
+            project_path.write_text(
+                json.dumps({"schema_version": 1, "sprites": [{"id": "sprite_001", "review_status": "needs_review", "review_flags": ["edited"]}]}),
+                encoding="utf-8",
+            )
+
+            result = run_ide_command(
+                {
+                    "action": "sprite.save_to_project",
+                    "project_path": str(project_path),
+                    "sprite_id": "sprite_001",
+                    "input": str(source),
+                    "operations": [{"tool": "replace_color", "source": "#ff0000", "target": "#0000ff"}],
+                }
+            )
+
+            updated = json.loads(project_path.read_text(encoding="utf-8"))
+            self.assertEqual(result["ok"], True)
+            self.assertTrue(Path(result["output"]).exists())
+            self.assertEqual(updated["sprites"][0]["review_status"], "approved")
+            self.assertEqual(updated["sprites"][0]["applied_output_file"], result["output"])
+            with Image.open(result["output"]) as image:
+                self.assertEqual(image.getpixel((0, 0)), (0, 0, 255, 255))
+
     def test_run_ide_command_dispatches_palette_variant_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

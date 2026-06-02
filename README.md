@@ -72,8 +72,8 @@ For IDEs and scripts, call the JSON API:
 python tools\sprite_ide_api.py --json "{""action"":""palette.extract"",""input"":""G:\path\sprite.png""}"
 ```
 
-Supported IDE actions are `sprite.edit`, `sprite.batch_edit`, `palette.extract`, `palette.swap`, `palette.hue_shift`, `palette.variants`, and `autotile.generate`.
-When using `--request`, relative `input`, `output`, `output_dir`, `package_dir`, and `inputs` paths resolve from the request file's directory.
+Supported IDE actions are `sprite.edit`, `sprite.batch_edit`, `sprite.save_to_project`, `palette.extract`, `palette.swap`, `palette.hue_shift`, `palette.variants`, and `autotile.generate`.
+When using `--request`, relative `input`, `output`, `output_dir`, `package_dir`, `project_path`, and `inputs` paths resolve from the request file's directory.
 
 ## SpriteCut MCP Server
 

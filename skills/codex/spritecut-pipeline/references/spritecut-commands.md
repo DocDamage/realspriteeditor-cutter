@@ -189,6 +189,24 @@ Use when the same edit pipeline should run across many sprites.
 
 This writes edited PNGs, `batch_edit_manifest.json`, and `batch_edit_contact.png`.
 
+### sprite.save_to_project
+
+Use when an edited sprite should be saved back into a loaded SpriteCut project manifest.
+
+```json
+{
+  "action": "sprite.save_to_project",
+  "project_path": "G:/assets/project.spritecut.json",
+  "sprite_id": "sprite_001",
+  "input": "G:/assets/sprite_001.png",
+  "operations": [
+    {"tool": "replace_color", "source": "#ff0000", "target": "#0000ff"}
+  ]
+}
+```
+
+This writes `applied_project/sprites/edited/<sprite_id>.png`, sets `applied_output_file`, and marks the sprite approved. Add `output_dir` to override the destination folder.
+
 ### autotile.generate
 
 Use to turn a tile into a 16-variant cardinal bitmask sheet and engine handoff metadata.
@@ -250,6 +268,13 @@ Use the Editor tab's embedded workspace or `Fullscreen Editor` mode for mouse to
 Supported `sprite.edit` and `sprite.batch_edit` operations:
 
 - `add_layer`: `name`, `visible`, `opacity`
+- `select_layer`: `index`
+- `rename_layer`: `index`, `name`
+- `duplicate_layer`: `index`, optional `name`
+- `delete_layer`: `index`
+- `reorder_layer`: `from_index`, `to_index`
+- `set_layer_visibility`: `index`, `visible`
+- `set_layer_opacity`: `index`, `opacity` from `0.0` to `1.0`
 - `draw_pixel`: `x`, `y`, `color`
 - `draw_line`: `start`, `end`, `color`, `width`
 - `fill_rect`: `rect`, `color`

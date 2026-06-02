@@ -83,6 +83,16 @@ BUILT_IN_PRESETS: dict[str, dict[str, object]] = {
 }
 
 
+def _safe_print(message: object) -> None:
+    text = str(message)
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        safe_text = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        print(safe_text)
+
+
 @dataclass
 class SpriteRecord:
     id: str
@@ -1357,7 +1367,7 @@ def process_sheet_batch(
     sheets_processed = len({record.source_file for record in all_records})
     if options.workers == 1 or len(sheets) <= 1:
         for sheet in sheets_to_process:
-            print(f"PROCESSING {sheet}")
+            _safe_print(f"PROCESSING {sheet}")
             try:
                 records = process_sheet(sheet, out_dir, preview_dir, options)
             except Exception as exc:
@@ -1365,30 +1375,30 @@ def process_sheet_batch(
                 if options.on_error == "fail":
                     raise SystemExit(f"Failed processing {sheet}: {message}") from exc
                 sheet_errors.append(SheetError(source_file=str(sheet), error=message))
-                print(f"SKIPPED {sheet}: {message}")
+                _safe_print(f"SKIPPED {sheet}: {message}")
                 continue
             all_records.extend(records)
             sheets_processed += 1
-            print(f"DONE {sheet} sprites={len(records)}")
+            _safe_print(f"DONE {sheet} sprites={len(records)}")
     else:
         records_by_sheet: dict[Path, list[SpriteRecord]] = {}
         with ThreadPoolExecutor(max_workers=options.workers) as executor:
             futures = {}
             for sheet in sheets_to_process:
-                print(f"PROCESSING {sheet}")
+                _safe_print(f"PROCESSING {sheet}")
                 futures[executor.submit(process_sheet, sheet, out_dir, preview_dir, options)] = sheet
             for future in as_completed(futures):
                 sheet = futures[future]
                 try:
                     records = future.result()
                     records_by_sheet[sheet] = records
-                    print(f"DONE {sheet} sprites={len(records)}")
+                    _safe_print(f"DONE {sheet} sprites={len(records)}")
                 except Exception as exc:
                     message = f"{type(exc).__name__}: {exc}"
                     if options.on_error == "fail":
                         raise SystemExit(f"Failed processing {sheet}: {message}") from exc
                     sheet_errors.append(SheetError(source_file=str(sheet), error=message))
-                    print(f"SKIPPED {sheet}: {message}")
+                    _safe_print(f"SKIPPED {sheet}: {message}")
         for sheet in sheets_to_process:
             records = records_by_sheet.get(sheet)
             if records is not None:
@@ -1414,12 +1424,12 @@ def write_run_outputs(
 
 
 def print_run_summary(out_dir: Path, records: list[SpriteRecord]) -> None:
-    print(f"OUTPUT={out_dir}")
-    print(f"SPRITES={len(records)}")
+    _safe_print(f"OUTPUT={out_dir}")
+    _safe_print(f"SPRITES={len(records)}")
     for kind, count in sorted(Counter(record.kind for record in records).items()):
-        print(f"KIND {kind}={count}")
+        _safe_print(f"KIND {kind}={count}")
     for category, count in sorted(Counter(record.category for record in records).items()):
-        print(f"CATEGORY {category}={count}")
+        _safe_print(f"CATEGORY {category}={count}")
 
 
 def run_from_args(args: argparse.Namespace, config_defaults: dict[str, object], raw_argv: list[str]) -> int:
@@ -1457,7 +1467,7 @@ def run_cli(argv: list[str] | None = None) -> int:
     pre_args, _remaining = pre_parser.parse_known_args(raw_argv)
     if pre_args.list_presets:
         for name in sorted(BUILT_IN_PRESETS):
-            print(name)
+            _safe_print(name)
         return 0
     config_defaults = load_config_defaults(pre_args.config, pre_args.preset)
     parser = build_arg_parser(config_defaults, pre_parser)

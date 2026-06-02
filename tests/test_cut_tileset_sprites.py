@@ -110,6 +110,20 @@ def detection(label: int, x: int, y: int, width: int, height: int) -> DetectedSp
 
 
 class CutTilesetSpritesTests(unittest.TestCase):
+    def test_safe_progress_print_does_not_crash_on_cp1252_stdout_with_unicode_paths(self) -> None:
+        buffer = io.BytesIO()
+        stdout = io.TextIOWrapper(buffer, encoding="cp1252")
+        original_stdout = sys.stdout
+        try:
+            sys.stdout = stdout
+            cutter_module._safe_print("PROCESSING G:/assets/emoji_\U0001f9df.png")
+            stdout.flush()
+        finally:
+            sys.stdout = original_stdout
+
+        self.assertIn(b"PROCESSING", buffer.getvalue())
+        self.assertIn(b"?", buffer.getvalue())
+
     def test_cli_parser_and_option_builder_are_exposed_for_refactorable_entrypoints(self) -> None:
         parser = build_arg_parser({"auto_detect_all": False, "mode": "tileset"})
         args = parser.parse_args(

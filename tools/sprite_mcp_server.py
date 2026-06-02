@@ -34,6 +34,7 @@ MCP_TOOL_NAMES = [
     "sprite_edit",
     "sprite_batch_edit",
     "sprite_save_to_project",
+    "project_vision_label",
     "autotile_generate",
     "create_sample_pack",
     "process_sheets",
@@ -75,6 +76,7 @@ def read_actions_resource() -> str:
             "- sprite.edit -> sprite_edit",
             "- sprite.batch_edit -> sprite_batch_edit",
             "- sprite.save_to_project -> sprite_save_to_project",
+            "- project.vision_label -> project_vision_label",
             "- autotile.generate -> autotile_generate",
             "- project processing -> process_sheets, review_dashboard, review_and_apply_project",
         ]
@@ -401,6 +403,32 @@ def sprite_save_to_project(
     return run_ide_command(command)
 
 
+def project_vision_label(
+    project_path: str,
+    provider: str = "openai",
+    min_confidence: float = 0.8,
+    cache_path: str = "",
+    limit: int = 0,
+    model: str = "",
+    fixture_labels: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Apply required vision labels to a SpriteCut project manifest."""
+    command: dict[str, Any] = {
+        "action": "project.vision_label",
+        "project_path": project_path,
+        "provider": provider,
+        "min_confidence": min_confidence,
+        "limit": limit,
+    }
+    if cache_path:
+        command["cache_path"] = cache_path
+    if model:
+        command["model"] = model
+    if fixture_labels is not None:
+        command["fixture_labels"] = fixture_labels
+    return run_ide_command(command)
+
+
 def autotile_generate(input: str, output_dir: str, name: str = "", engine: str = "generic") -> dict[str, Any]:
     """Generate a 16-mask cardinal autotile sheet and engine rule metadata."""
     command: dict[str, Any] = {
@@ -433,6 +461,7 @@ def build_mcp_server(fast_mcp_factory: Callable[..., Any] | None = None) -> Any:
         sprite_edit,
         sprite_batch_edit,
         sprite_save_to_project,
+        project_vision_label,
         autotile_generate,
         create_sample_pack,
         process_sheets,

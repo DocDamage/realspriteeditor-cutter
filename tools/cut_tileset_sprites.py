@@ -216,7 +216,15 @@ def _safe_extract_relative_path(raw_name: str) -> Path | None:
     normalized = raw_name.replace("\\", "/")
     if normalized.startswith("/") or normalized.startswith("../") or "/../" in normalized:
         return None
-    relative = Path(normalized)
+    raw_parts = normalized.split("/")
+    cleaned_parts: list[str] = []
+    for part in raw_parts:
+        cleaned = re.sub(r'[<>:"|?*\x00-\x1f]+', "_", part.strip())
+        cleaned = cleaned.rstrip(".")
+        if cleaned in {"", ".", ".."}:
+            return None
+        cleaned_parts.append(cleaned)
+    relative = Path(*cleaned_parts)
     if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
         return None
     return relative
@@ -636,7 +644,32 @@ def apply_auto_defaults(args: argparse.Namespace, defaults: dict[str, object], c
     return applied
 
 
-def classify_sprite(sheet_stem: str, x: int, y: int, w: int, h: int, foreground_pixels: int) -> str:
+def _source_taxonomy_tokens(source_path: Path, sheet_stem: str) -> set[str]:
+    ignored = {"g", "all", "2d", "assets", "stay", "here", "_organized_sprites", "_extracted_archives", "sprites", "organized", "separated"}
+    text = " ".join([*source_path.parts, sheet_stem]).lower()
+    parts = re.split(r"[^a-z0-9]+", text)
+    return {part for part in parts if part and part not in ignored}
+
+
+def classify_sprite(source_path: Path | str, sheet_stem: str, x: int, y: int, w: int, h: int, foreground_pixels: int) -> str:
+    tokens = _source_taxonomy_tokens(Path(source_path), sheet_stem)
+    if tokens & {"tree", "trees", "bush", "bushes", "plant", "plants", "grass", "flower", "flowers", "foliage", "vegetation"}:
+        return "vegetation_and_trees"
+    if tokens & {"character", "characters", "hero", "knight", "enemy", "enemies", "zombie", "npc", "player", "monster", "robot", "bots"}:
+        return "characters_and_creatures"
+    if tokens & {"portrait", "portraits", "face", "faces", "avatar", "avatars"}:
+        return "portraits_and_faces"
+    if tokens & {"font", "fonts", "ui", "gui", "icon", "icons", "button", "buttons", "cursor", "cursors"}:
+        return "ui_icons_and_fonts"
+    if tokens & {"tile", "tiles", "tileset", "autotile", "auto", "floor", "floors", "wall", "walls", "terrain", "ground"}:
+        return "tiles_and_terrain"
+    if tokens & {"background", "backgrounds", "parallax", "sky", "skies"}:
+        return "backgrounds_and_parallax"
+    if tokens & {"weapon", "weapons", "sword", "swords", "gun", "guns", "projectile", "projectiles"}:
+        return "weapons_and_projectiles"
+    if tokens & {"object", "objects", "prop", "props", "item", "items", "crate", "crates", "barrel", "barrels", "chest", "chests"}:
+        return "props_and_items"
+
     area = w * h
     fill = foreground_pixels / max(1, area)
     aspect = w / max(1, h)

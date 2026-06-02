@@ -100,7 +100,9 @@ class GoldenAndPackagingTests(unittest.TestCase):
             self.assertTrue((target / "requirements-ui.txt").exists())
             self.assertTrue((target / "requirements-dev.txt").exists())
             self.assertTrue((target / "requirements-mcp.txt").exists())
+            self.assertTrue((target / "requirements-vision.txt").exists())
             self.assertTrue((target / "tools" / "sprite_mcp_server.py").exists())
+            self.assertTrue((target / "tools" / "sprite_vision_labeler.py").exists())
             self.assertTrue((target / "skills" / "codex" / "spritecut-pipeline" / "SKILL.md").exists())
 
     def test_github_workflows_run_tests_compile_and_release_packaging(self) -> None:
@@ -140,6 +142,19 @@ class GoldenAndPackagingTests(unittest.TestCase):
         self.assertIn("spritecut://quality-checklist", text)
         self.assertIn("review_and_apply_project", text)
         self.assertIn("mcp_client_config", text)
+
+    def test_vision_requirements_and_readme_document_semantic_labeling(self) -> None:
+        requirements = REPO_ROOT / "requirements-vision.txt"
+        readme = REPO_ROOT / "README.md"
+
+        self.assertTrue(requirements.exists(), str(requirements))
+        self.assertIn("openai", requirements.read_text(encoding="utf-8").lower())
+
+        text = readme.read_text(encoding="utf-8")
+        self.assertIn("project.vision_label", text)
+        self.assertIn("requirements-vision.txt", text)
+        self.assertIn("OPENAI_API_KEY", text)
+        self.assertIn("project_vision_label", text)
 
 
 if __name__ == "__main__":

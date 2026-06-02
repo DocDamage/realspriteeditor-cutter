@@ -308,6 +308,21 @@ class CutTilesetSpritesTests(unittest.TestCase):
             self.assertEqual([path.name for path in sheets], ["props.png"])
             self.assertTrue((root / "out" / "_extracted_archives" / "packs" / "props" / "nested" / "props.png").exists())
 
+    def test_discovery_sanitizes_trailing_space_zip_member_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_source = root / "source.png"
+            make_varied_tileset_sheet(archive_source)
+            archive = root / "props.zip"
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as handle:
+                handle.write(archive_source, "nested folder /props.png")
+            archive_source.unlink()
+
+            sheets = discover_sheet_files(archive, include_archives=True, archive_extract_dir=root / "out" / "_extracted_archives")
+
+            self.assertEqual([path.name for path in sheets], ["props.png"])
+            self.assertTrue((root / "out" / "_extracted_archives" / "props" / "nested folder" / "props.png").exists())
+
     def test_discovery_rejects_unsafe_zip_member_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -525,6 +540,22 @@ class CutTilesetSpritesTests(unittest.TestCase):
         self.assertEqual(defaults["mode"], "animation")
         self.assertEqual(defaults["animation_frame_mode"], "fixed")
         self.assertIn("animation_fps", defaults)
+
+    def test_source_context_improves_categories_and_display_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "Asset Pack" / "trees-blackland"
+            source_dir.mkdir(parents=True)
+            make_border_and_color_sheet(source_dir / "tree5.png")
+
+            result = run_cutter(root, "--mode", "tileset", "--out-name", "out")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with (root / "out" / "manifest" / "sprites.json").open(encoding="utf-8") as handle:
+                records = json.load(handle)
+            self.assertTrue(records)
+            self.assertEqual(records[0]["category"], "vegetation_and_trees")
+            self.assertIn("tree5_vegetation_and_trees", records[0]["display_name"])
 
     def test_config_overrides_builtin_preset_options(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

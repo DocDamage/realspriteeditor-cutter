@@ -72,8 +72,17 @@ For IDEs and scripts, call the JSON API:
 python tools\sprite_ide_api.py --json "{""action"":""palette.extract"",""input"":""G:\path\sprite.png""}"
 ```
 
-Supported IDE actions are `sprite.edit`, `sprite.batch_edit`, `sprite.save_to_project`, `palette.extract`, `palette.swap`, `palette.hue_shift`, `palette.variants`, and `autotile.generate`.
+Supported IDE actions are `sprite.edit`, `sprite.batch_edit`, `sprite.save_to_project`, `project.vision_label`, `palette.extract`, `palette.swap`, `palette.hue_shift`, `palette.variants`, and `autotile.generate`.
 When using `--request`, relative `input`, `output`, `output_dir`, `package_dir`, `project_path`, and `inputs` paths resolve from the request file's directory.
+
+For semantic object naming and categorization, install the optional vision dependency and run `project.vision_label` after cutting:
+
+```powershell
+python -m pip install -r requirements-vision.txt
+python tools\sprite_ide_api.py --json "{""action"":""project.vision_label"",""project_path"":""G:\path\_organized_sprites\project.spritecut.json"",""provider"":""openai""}"
+```
+
+The OpenAI provider requires `OPENAI_API_KEY`, writes `manifest/vision_label_cache.json`, applies confident `display_name` and `category` labels, and leaves uncertain sprites marked for review.
 
 ## SpriteCut MCP Server
 
@@ -91,7 +100,7 @@ Configure your MCP client to launch:
 python tools\sprite_mcp_server.py
 ```
 
-The server exposes editor tools (`palette_extract`, `palette_swap`, `palette_hue_shift`, `palette_variants`, `sprite_edit`, `sprite_batch_edit`, `autotile_generate`), setup helpers (`mcp_health_check`, `mcp_client_config`), and production workflow tools (`create_sample_pack`, `process_sheets`, `load_project_summary`, `review_dashboard`, `apply_project_outputs`, `review_and_apply_project`, `generate_import_plans`). Use `include_archives=true` on `process_sheets` for ZIP-heavy asset libraries.
+The server exposes editor tools (`palette_extract`, `palette_swap`, `palette_hue_shift`, `palette_variants`, `sprite_edit`, `sprite_batch_edit`, `sprite_save_to_project`, `project_vision_label`, `autotile_generate`), setup helpers (`mcp_health_check`, `mcp_client_config`), and production workflow tools (`create_sample_pack`, `process_sheets`, `load_project_summary`, `review_dashboard`, `apply_project_outputs`, `review_and_apply_project`, `generate_import_plans`). Use `include_archives=true` on `process_sheets` for ZIP-heavy asset libraries.
 
 It also gives agents context resources:
 
@@ -200,5 +209,5 @@ This writes edited PNGs, `batch_edit_manifest.json`, and `batch_edit_contact.png
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py"
-python -m py_compile tools\cut_tileset_sprites.py tools\sprite_processing.py tools\sprite_atlas.py tools\sprite_manifest.py tools\sprite_reports.py tools\sprite_sheet_tool_ui.py tools\sprite_project.py tools\sprite_studio.py tools\sprite_editor.py tools\autotile_tools.py tools\sprite_ide_api.py tools\golden_sprite_fixtures.py tools\sprite_mcp_server.py
+python -m py_compile tools\cut_tileset_sprites.py tools\sprite_processing.py tools\sprite_atlas.py tools\sprite_manifest.py tools\sprite_reports.py tools\sprite_sheet_tool_ui.py tools\sprite_project.py tools\sprite_studio.py tools\sprite_editor.py tools\autotile_tools.py tools\sprite_ide_api.py tools\golden_sprite_fixtures.py tools\sprite_mcp_server.py tools\sprite_vision_labeler.py
 ```

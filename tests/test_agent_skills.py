@@ -81,7 +81,21 @@ def adapt_request_for_temp(command: dict[str, object], root: Path) -> dict[str, 
         sprite_id = str(adapted.get("sprite_id", "sprite_001"))
         project_path = root / "project.spritecut.json"
         project_path.write_text(
-            json.dumps({"schema_version": 1, "sprites": [{"id": sprite_id, "review_status": "needs_review", "review_flags": []}]}),
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "sprites": [
+                        {
+                            "id": sprite_id,
+                            "display_name": "unknown_001",
+                            "category": "sprites",
+                            "output_file": str(source),
+                            "review_status": "needs_review",
+                            "review_flags": [],
+                        }
+                    ],
+                }
+            ),
             encoding="utf-8",
         )
         adapted["project_path"] = str(project_path)
@@ -145,6 +159,7 @@ class AgentSkillPackTests(unittest.TestCase):
                     "sprite.edit",
                     "sprite.batch_edit",
                     "sprite.save_to_project",
+                    "project.vision_label",
                     "palette.extract",
                     "palette.swap",
                     "palette.hue_shift",
@@ -170,6 +185,7 @@ class AgentSkillPackTests(unittest.TestCase):
                 "sprite.edit",
                 "sprite.batch_edit",
                 "sprite.save_to_project",
+                "project.vision_label",
                 "autotile.generate",
             ],
         )

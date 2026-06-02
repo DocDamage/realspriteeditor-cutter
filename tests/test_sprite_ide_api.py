@@ -211,6 +211,53 @@ class SpriteIdeApiTests(unittest.TestCase):
             self.assertTrue(Path(result["contact_sheet"]).exists())
             self.assertEqual(len(result["outputs"]), 2)
 
+    def test_run_ide_command_dispatches_project_vision_label_with_fixture_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "sprite.png"
+            project_path = root / "project.spritecut.json"
+            write_source(source)
+            project_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "sprites": [
+                            {
+                                "id": "sprite_001",
+                                "display_name": "unknown_001",
+                                "category": "sprites",
+                                "output_file": str(source),
+                                "review_status": "needs_review",
+                                "review_flags": [],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = run_ide_command(
+                {
+                    "action": "project.vision_label",
+                    "project_path": str(project_path),
+                    "provider": "fixture",
+                    "fixture_labels": {
+                        "sprite_001": {
+                            "display_name": "red_gem",
+                            "category": "props_and_items",
+                            "description": "A red gem pickup.",
+                            "confidence": 0.91,
+                        }
+                    },
+                }
+            )
+
+            updated = json.loads(project_path.read_text(encoding="utf-8"))
+            self.assertEqual(result["ok"], True)
+            self.assertEqual(result["action"], "project.vision_label")
+            self.assertEqual(updated["sprites"][0]["display_name"], "red_gem")
+            self.assertEqual(updated["sprites"][0]["category"], "props_and_items")
+
     def test_cli_accepts_json_request_file_and_prints_machine_readable_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -207,6 +207,29 @@ Use when an edited sprite should be saved back into a loaded SpriteCut project m
 
 This writes `applied_project/sprites/edited/<sprite_id>.png`, sets `applied_output_file`, and marks the sprite approved. Add `output_dir` to override the destination folder.
 
+### project.vision_label
+
+Use after cutting a project when semantic object names and categories matter. The default `openai` provider requires `OPENAI_API_KEY`; low-confidence labels stay in review.
+
+```json
+{
+  "action": "project.vision_label",
+  "project_path": "G:/assets/project.spritecut.json",
+  "provider": "fixture",
+  "min_confidence": 0.8,
+  "fixture_labels": {
+    "sprite_001": {
+      "display_name": "red_gem",
+      "category": "props_and_items",
+      "description": "A red gem pickup.",
+      "confidence": 0.91
+    }
+  }
+}
+```
+
+For production runs, use `"provider": "openai"` and omit `fixture_labels`. The pass writes `manifest/vision_label_cache.json`, stores each sprite's `vision_label`, applies confident `display_name` and `category` values, and marks uncertain labels with `vision_low_confidence`.
+
 ### autotile.generate
 
 Use to turn a tile into a 16-variant cardinal bitmask sheet and engine handoff metadata.
@@ -299,7 +322,7 @@ Supported `sprite.edit` and `sprite.batch_edit` operations:
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py"
-python -m py_compile tools\cut_tileset_sprites.py tools\sprite_processing.py tools\sprite_atlas.py tools\sprite_manifest.py tools\sprite_reports.py tools\sprite_sheet_tool_ui.py tools\sprite_project.py tools\sprite_studio.py tools\sprite_editor.py tools\autotile_tools.py tools\sprite_ide_api.py tools\golden_sprite_fixtures.py
+python -m py_compile tools\cut_tileset_sprites.py tools\sprite_processing.py tools\sprite_atlas.py tools\sprite_manifest.py tools\sprite_reports.py tools\sprite_sheet_tool_ui.py tools\sprite_project.py tools\sprite_studio.py tools\sprite_editor.py tools\autotile_tools.py tools\sprite_ide_api.py tools\golden_sprite_fixtures.py tools\sprite_mcp_server.py tools\sprite_vision_labeler.py
 python tools\sync_spritecut_skills.py --check
 python tools\sprite_sheet_tool_ui.py --help
 python tools\sprite_ide_api.py --help

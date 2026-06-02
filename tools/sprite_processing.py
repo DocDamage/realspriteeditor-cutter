@@ -18,7 +18,7 @@ class SheetProcessingHooks:
     grouped_components: Callable[..., tuple[np.ndarray, np.ndarray, int]]
     extract_detections: Callable[..., list[Any]]
     resolve_sheet_mode: Callable[[str, list[Any], int], str]
-    classify_sprite: Callable[[str, int, int, int, int, int], str]
+    classify_sprite: Callable[[Path, str, int, int, int, int, int], str]
     should_use_full_alpha: Callable[[str, int, int, int], bool]
     analyze_sprite_pixels: Callable[[np.ndarray], tuple[float, float, list[str]]]
     detect_pivot: Callable[[np.ndarray, str], dict[str, float | str]]
@@ -92,9 +92,10 @@ def process_tileset_sheet(
     ]
 
     for detection in detections:
-        category = hooks.classify_sprite(source_stem, detection.x, detection.y, detection.width, detection.height, detection.foreground_pixels)
+        category = hooks.classify_sprite(source_path, source_stem, detection.x, detection.y, detection.width, detection.height, detection.foreground_pixels)
         counters[category] += 1
         sprite_id = f"{source_label}_{category}_{counters[category]:03d}"
+        display_name = hooks.safe_name(f"{source_stem}_{category}_{counters[category]:03d}")
         file_name = f"{sprite_id}.png"
         category_dir = out_dir / "sprites" / category
         category_dir.mkdir(parents=True, exist_ok=True)
@@ -124,7 +125,7 @@ def process_tileset_sheet(
 
         record = hooks.sprite_record_cls(
             id=sprite_id,
-            display_name=sprite_id,
+            display_name=display_name,
             source_sheet=source_label,
             source_file=str(source_path),
             kind="sprite",

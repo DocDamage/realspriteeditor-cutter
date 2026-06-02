@@ -19,6 +19,7 @@ Copy-Item -Path (Join-Path $Root "sprite_sheet_tool_ui.py") -Destination $Target
 Copy-Item -Path (Join-Path $Root "requirements-ui.txt") -Destination $Target -Force
 Copy-Item -Path (Join-Path $Root "requirements-dev.txt") -Destination $Target -Force
 Copy-Item -Path (Join-Path $Root "requirements-mcp.txt") -Destination $Target -Force
+Copy-Item -Path (Join-Path $Root "requirements-vision.txt") -Destination $Target -Force
 Copy-Item -Path (Join-Path $Root "skills") -Destination $Target -Recurse -Force
 
 Write-Host "Packaged Sprite Sheet Processor to $Target"

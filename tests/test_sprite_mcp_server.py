@@ -37,6 +37,7 @@ from tools.sprite_mcp_server import (
     review_sprite_project,
     sprite_edit,
     sprite_save_to_project,
+    project_vision_label,
 )
 
 
@@ -137,6 +138,36 @@ class SpriteMcpServerTests(unittest.TestCase):
             self.assertTrue(Path(result["output"]).exists())
             self.assertIn("sprite.save_to_project", read_actions_resource())
             self.assertEqual(load_project_summary(str(project_path))["statuses"], {"approved": 1})
+
+    def test_project_vision_label_updates_manifest_through_mcp_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            project_path = root / "project.spritecut.json"
+            write_source(source)
+            project_path.write_text(
+                '{"schema_version": 1, "sprites": [{"id": "sprite_001", "display_name": "unknown", "category": "sprites", "output_file": "'
+                + str(source).replace("\\", "\\\\")
+                + '", "review_status": "needs_review", "review_flags": []}]}',
+                encoding="utf-8",
+            )
+
+            result = project_vision_label(
+                str(project_path),
+                provider="fixture",
+                fixture_labels={
+                    "sprite_001": {
+                        "display_name": "red_pickup",
+                        "category": "props_and_items",
+                        "description": "A red pickup item.",
+                        "confidence": 0.92,
+                    }
+                },
+            )
+
+            self.assertEqual(result["ok"], True)
+            self.assertIn("project.vision_label", read_actions_resource())
+            self.assertEqual(load_project_summary(str(project_path))["categories"], {"props_and_items": 1})
 
     def test_autotile_generate_writes_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

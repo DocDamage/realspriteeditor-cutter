@@ -12,11 +12,13 @@ try:
     from tools.autotile_tools import write_autotile_package
     from tools.sprite_editor import SpriteEditSession, apply_edit_operations, apply_hue_shift, apply_palette_swap, extract_palette, write_batch_edit_package, write_edit_package, write_palette_variant_package
     from tools.sprite_project import attach_sprite_edit_output, load_project, save_project
+    from tools.sprite_vision_labeler import label_project_with_vision, provider_from_name
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tools.autotile_tools import write_autotile_package
     from tools.sprite_editor import SpriteEditSession, apply_edit_operations, apply_hue_shift, apply_palette_swap, extract_palette, write_batch_edit_package, write_edit_package, write_palette_variant_package
     from tools.sprite_project import attach_sprite_edit_output, load_project, save_project
+    from tools.sprite_vision_labeler import label_project_with_vision, provider_from_name
 
 
 def _load_image(path: Path | str) -> Image.Image:
@@ -174,6 +176,23 @@ def run_ide_command(command: dict[str, Any]) -> dict[str, Any]:
         engine = str(command.get("engine", "generic")).strip() or "generic"
         package = write_autotile_package(_load_image(source), output_dir, name=name, engine=engine)
         return {"ok": True, "action": action, "input": str(source), **package}
+
+    if action == "project.vision_label":
+        project_path = _require_path(command, "project_path")
+        provider = provider_from_name(
+            str(command.get("provider", "openai")),
+            fixture_labels=command.get("fixture_labels") if isinstance(command.get("fixture_labels"), dict) else None,
+            model=str(command.get("model", "")),
+        )
+        cache_text = str(command.get("cache_path", "")).strip()
+        result = label_project_with_vision(
+            project_path,
+            provider=provider,
+            min_confidence=float(command.get("min_confidence", 0.8)),
+            cache_path=Path(cache_text) if cache_text else None,
+            limit=int(command.get("limit", 0)),
+        )
+        return {"action": action, **result}
 
     raise ValueError(f"Unsupported sprite IDE action: {action}")
 

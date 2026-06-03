@@ -225,6 +225,7 @@ def label_project_with_vision(
     cache_path: Path | str | None = None,
     limit: int = 0,
     checkpoint_interval: int = 500,
+    progress_interval: int = 25,
 ) -> dict[str, Any]:
     path = Path(project_path)
     project = load_project(path)
@@ -235,6 +236,7 @@ def label_project_with_vision(
     approved = 0
     low_confidence = 0
     cached = 0
+    attempted = 0
     errors: list[dict[str, str]] = []
 
     sprites = project.get("sprites", [])
@@ -242,6 +244,13 @@ def label_project_with_vision(
         if not isinstance(sprite, dict) or (limit and labeled >= limit):
             continue
         try:
+            attempted += 1
+            if progress_interval > 0 and (attempted == 1 or attempted % progress_interval == 0):
+                print(
+                    f"VISION_ATTEMPT provider={provider.name} attempted={attempted} "
+                    f"labeled={labeled} sprite_id={sprite.get('id', '')}",
+                    flush=True,
+                )
             image_path = _resolve_sprite_image(path, sprite)
             image_hash = _image_sha256(image_path)
             cache_key = f"{provider.name}:{image_hash}"

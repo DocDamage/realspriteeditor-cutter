@@ -191,6 +191,8 @@ def run_ide_command(command: dict[str, Any]) -> dict[str, Any]:
             min_confidence=float(command.get("min_confidence", 0.8)),
             cache_path=Path(cache_text) if cache_text else None,
             limit=int(command.get("limit", 0)),
+            checkpoint_interval=int(command.get("checkpoint_interval", 500)),
+            progress_interval=int(command.get("progress_interval", 25)),
         )
         return {"action": action, **result}
 

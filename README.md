@@ -55,6 +55,14 @@ After editing a project in the UI Review tab, use `Apply Outputs` to write corre
 
 The UI also includes a `Studio` tab for production handoff. It adds a health score, prioritized review queue, searchable asset browser, taxonomy auto-naming, rerun diffing, collision/pivot/anchor profile generation, trained preset suggestions, upgraded atlas/import planning, and a one-click `Review + Apply` pass.
 
+Build a compact source-folder learning index before or after cutting when a collection already has meaningful folder/file names:
+
+```powershell
+python -m tools.sprite_source_learning "G:\All 2D Assets Stay Here\ansimuz" --output "G:\All 2D Assets Stay Here\ansimuz\ansimuz_sprite_learning_index.json"
+```
+
+The generated JSON stays beside the local assets and records learned sequence groups, semantic name bases, category hints, and rename patterns such as `enemy_death_frame_{frame:03d}`. This is metadata for teaching SpriteCut how a source collection is organized; it is not model fine-tuning.
+
 The `Editor` tab adds sprite-level editing and recoloring:
 
 - Use the embedded workspace or `Fullscreen Editor` mode for mouse tools, keyboard shortcuts, layers, palette controls, animation timeline preview, contextual help, and project-attached saves.

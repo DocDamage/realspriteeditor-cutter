@@ -159,6 +159,13 @@ class SpriteVisionLabelerTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "GEMINI_API_KEY or GOOGLE_API_KEY"):
                         provider_from_name(provider)
 
+    def test_kimi_and_moonshot_provider_aliases_require_moonshot_credentials(self) -> None:
+        with mock.patch.dict("os.environ", {"KIMI_API_KEY": "", "MOONSHOT_API_KEY": ""}, clear=False):
+            for provider in ("kimi", "moonshot"):
+                with self.subTest(provider=provider):
+                    with self.assertRaisesRegex(RuntimeError, "KIMI_API_KEY or MOONSHOT_API_KEY"):
+                        provider_from_name(provider)
+
     def test_reconstruct_project_from_cut_pngs_writes_vision_ready_project(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

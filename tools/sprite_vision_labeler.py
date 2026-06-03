@@ -206,6 +206,44 @@ class GeminiVisionProvider:
         return _normalize_label(json.loads(match.group(0)), self.name)
 
 
+class KimiVisionProvider:
+    name = "kimi"
+
+    def __init__(self, model: str = "moonshot-v1-8k-vision-preview") -> None:
+        api_key = os.environ.get("KIMI_API_KEY") or os.environ.get("MOONSHOT_API_KEY")
+        if not api_key:
+            raise RuntimeError("KIMI_API_KEY or MOONSHOT_API_KEY is required for provider='kimi'.")
+        from openai import OpenAI
+
+        self.client = OpenAI(api_key=api_key, base_url="https://api.moonshot.ai/v1")
+        self.model = model
+
+    def label_sprite(self, image_path: Path, sprite: dict[str, Any]) -> dict[str, Any]:
+        data_url = "data:image/png;base64," + base64.b64encode(image_path.read_bytes()).decode("ascii")
+        prompt = (
+            "Identify this isolated 2D game sprite. Return only JSON with keys display_name, "
+            "category, description, confidence. Use snake_case display_name. Category must be one of: "
+            f"{', '.join(VISION_CATEGORIES)}. Confidence must be 0 to 1."
+        )
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+        )
+        text = str(response.choices[0].message.content or "").strip()
+        match = re.search(r"\{.*\}", text, flags=re.S)
+        if match is None:
+            raise ValueError(f"Kimi vision response did not contain JSON: {text[:200]}")
+        return _normalize_label(json.loads(match.group(0)), self.name)
+
+
 def provider_from_name(name: str, *, fixture_labels: dict[str, dict[str, Any]] | None = None, model: str = "") -> VisionProvider:
     provider_name = name.strip().lower() or "openai"
     if provider_name == "fixture":
@@ -214,6 +252,8 @@ def provider_from_name(name: str, *, fixture_labels: dict[str, dict[str, Any]] |
         return OpenAIVisionProvider(model=model or "gpt-4.1-mini")
     if provider_name in {"gemini", "nano_banana", "nano-banana"}:
         return GeminiVisionProvider(model=model or "gemini-2.5-flash")
+    if provider_name in {"kimi", "moonshot"}:
+        return KimiVisionProvider(model=model or "moonshot-v1-8k-vision-preview")
     raise ValueError(f"Unsupported vision provider: {name}")
 
 

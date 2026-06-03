@@ -10,6 +10,7 @@ from PIL import Image
 
 from tools.sprite_vision_labeler import FixtureVisionProvider, label_project_with_vision, provider_from_name
 from tools.reconstruct_sprite_project_from_cuts import write_reconstructed_project
+from tools.seeded_sprite_vision import apply_seeded_labels, count_missing_vision_labels
 
 
 def write_sprite(path: Path) -> None:
@@ -178,6 +179,72 @@ class SpriteVisionLabelerTests(unittest.TestCase):
             self.assertEqual(project["sprites"][0]["category"], "props_and_items")
             self.assertEqual(project["sprites"][1]["kind"], "animation_frame")
             self.assertEqual(project["sprites"][1]["sequence"], "hero_idle_row_01")
+
+    def test_apply_seeded_labels_streams_vision_labels_without_loading_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_path = root / "project.spritecut.vision.json"
+            output_path = root / "project.spritecut.vision.seeded.json"
+            seed_path = root / "manifest" / "vision_category_seeds.json"
+            project_path.write_text(
+                "\n".join(
+                    [
+                        "{",
+                        '  "schema_version": 1,',
+                        '  "sprites": [',
+                        json.dumps({"id": "sprite_001", "display_name": "wood_crate", "category": "props_and_items", "review_flags": ["auto_named"], "review_status": "needs_review"})
+                        + ",",
+                        json.dumps({"id": "sprite_002", "display_name": "idle_001", "category": "animation", "review_flags": [], "review_status": "needs_review"}),
+                        "  ],",
+                        '  "summary": {"total_sprites": 2}',
+                        "}",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            seed_path.parent.mkdir()
+            seed_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "provider": "gemini",
+                        "seeds": {
+                            "props_and_items": {
+                                "display_name": "wooden_crate",
+                                "category": "props_and_items",
+                                "description": "A wooden crate.",
+                                "confidence": 0.92,
+                                "provider": "gemini",
+                                "seed_category": "props_and_items",
+                                "seed_sprite_id": "sprite_001",
+                                "seed_image": "crate.png",
+                            },
+                            "animation": {
+                                "display_name": "idle_pose",
+                                "category": "animation",
+                                "description": "A character idle frame.",
+                                "confidence": 0.9,
+                                "provider": "gemini",
+                                "seed_category": "animation",
+                                "seed_sprite_id": "sprite_002",
+                                "seed_image": "idle.png",
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = apply_seeded_labels(project_path, seed_path, output_path, progress_interval=0)
+            counts = count_missing_vision_labels(output_path)
+
+            self.assertEqual(result["total"], 2)
+            self.assertEqual(counts["missing"], 0)
+            labeled = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(labeled["sprites"][0]["review_status"], "approved")
+            self.assertEqual(labeled["sprites"][0]["vision_label"]["provider"], "gemini_seeded")
+            self.assertIn("vision_labeled", labeled["sprites"][0]["review_flags"])
+            self.assertIn("vision_seeded", labeled["sprites"][1]["review_flags"])
 
 
 if __name__ == "__main__":

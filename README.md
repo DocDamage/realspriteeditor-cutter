@@ -63,6 +63,15 @@ python -m tools.sprite_source_learning "G:\All 2D Assets Stay Here\ansimuz" --ou
 
 The generated JSON stays beside the local assets and records learned sequence groups, semantic name bases, category hints, and rename patterns such as `enemy_death_frame_{frame:03d}`. This is metadata for teaching SpriteCut how a source collection is organized; it is not model fine-tuning.
 
+After a source learning index has representative vision labels, build a non-destructive final rename manifest:
+
+```powershell
+python -m tools.sprite_source_final_renames build "G:\All 2D Assets Stay Here\ansimuz\ansimuz_sprite_learning_index.vision.json" --output "G:\All 2D Assets Stay Here\ansimuz\ansimuz_sprite_final_renames.kimi.json" --provider kimi
+python -m tools.sprite_source_final_renames verify "G:\All 2D Assets Stay Here\ansimuz\ansimuz_sprite_final_renames.kimi.json"
+```
+
+This asks Kimi to choose production-safe final semantic bases from the representative image, source path, original rename pattern, path terms, and existing vision label. It writes old-to-new relative paths with collision-safe targets, but it does not rename the original files.
+
 The `Editor` tab adds sprite-level editing and recoloring:
 
 - Use the embedded workspace or `Fullscreen Editor` mode for mouse tools, keyboard shortcuts, layers, palette controls, animation timeline preview, contextual help, and project-attached saves.

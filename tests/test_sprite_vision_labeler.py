@@ -9,6 +9,7 @@ from unittest import mock
 from PIL import Image
 
 from tools.sprite_vision_labeler import FixtureVisionProvider, label_project_with_vision, provider_from_name
+from tools.reconstruct_sprite_project_from_cuts import write_reconstructed_project
 
 
 def write_sprite(path: Path) -> None:
@@ -156,6 +157,27 @@ class SpriteVisionLabelerTests(unittest.TestCase):
                 with self.subTest(provider=provider):
                     with self.assertRaisesRegex(RuntimeError, "GEMINI_API_KEY or GOOGLE_API_KEY"):
                         provider_from_name(provider)
+
+    def test_reconstruct_project_from_cut_pngs_writes_vision_ready_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sprite_path = root / "sprites" / "props_and_items" / "crate.png"
+            anim_path = root / "animations" / "hero_idle" / "row_01" / "row_01_001.png"
+            sprite_path.parent.mkdir(parents=True)
+            anim_path.parent.mkdir(parents=True)
+            write_sprite(sprite_path)
+            write_sprite(anim_path)
+            project_path = root / "project.spritecut.vision.json"
+
+            result = write_reconstructed_project(root, project_path, progress_interval=0)
+
+            project = json.loads(project_path.read_text(encoding="utf-8"))
+            self.assertEqual(result["total_sprites"], 2)
+            self.assertEqual(project["schema_version"], 1)
+            self.assertEqual(len(project["sprites"]), 2)
+            self.assertEqual(project["sprites"][0]["category"], "props_and_items")
+            self.assertEqual(project["sprites"][1]["kind"], "animation_frame")
+            self.assertEqual(project["sprites"][1]["sequence"], "hero_idle_row_01")
 
 
 if __name__ == "__main__":

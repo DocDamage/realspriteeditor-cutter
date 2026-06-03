@@ -224,6 +224,7 @@ def label_project_with_vision(
     min_confidence: float = 0.8,
     cache_path: Path | str | None = None,
     limit: int = 0,
+    checkpoint_interval: int = 500,
 ) -> dict[str, Any]:
     path = Path(project_path)
     project = load_project(path)
@@ -255,6 +256,13 @@ def label_project_with_vision(
                 approved += 1
             else:
                 low_confidence += 1
+            if checkpoint_interval > 0 and labeled % checkpoint_interval == 0:
+                _write_cache(cache_file, cache)
+                print(
+                    f"VISION_PROGRESS provider={provider.name} labeled={labeled} "
+                    f"cached={cached} approved={approved} low_confidence={low_confidence}",
+                    flush=True,
+                )
         except Exception as exc:
             errors.append({"sprite_id": str(sprite.get("id", "")), "error": f"{type(exc).__name__}: {exc}"})
 

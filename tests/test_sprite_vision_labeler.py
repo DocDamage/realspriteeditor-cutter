@@ -114,6 +114,42 @@ class SpriteVisionLabelerTests(unittest.TestCase):
             self.assertEqual(sprite["review_status"], "needs_review")
             self.assertIn("vision_low_confidence", sprite["review_flags"])
 
+    def test_label_project_with_vision_checkpoints_cache_during_long_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sprites_dir = root / "sprites"
+            sprites_dir.mkdir()
+            project_path = root / "project.spritecut.json"
+            sprites = []
+            labels = {}
+            for index in range(2):
+                sprite_id = f"sprite_{index + 1:03d}"
+                sprite_path = sprites_dir / f"{sprite_id}.png"
+                write_sprite(sprite_path)
+                sprites.append(
+                    {
+                        "id": sprite_id,
+                        "display_name": sprite_id,
+                        "category": "sprites",
+                        "output_file": str(sprite_path),
+                        "review_status": "needs_review",
+                        "review_flags": [],
+                    }
+                )
+                labels[sprite_id] = {
+                    "display_name": f"labeled_{index + 1}",
+                    "category": "props_and_items",
+                    "description": "A labeled test sprite.",
+                    "confidence": 0.95,
+                }
+            project_path.write_text(json.dumps({"schema_version": 1, "sprites": sprites}), encoding="utf-8")
+            provider = FixtureVisionProvider(labels)
+
+            with mock.patch("tools.sprite_vision_labeler._write_cache") as write_cache:
+                label_project_with_vision(project_path, provider=provider, checkpoint_interval=1)
+
+            self.assertEqual(write_cache.call_count, 3)
+
     def test_gemini_and_nano_banana_provider_aliases_require_google_credentials(self) -> None:
         with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": ""}, clear=False):
             for provider in ("gemini", "nano_banana"):

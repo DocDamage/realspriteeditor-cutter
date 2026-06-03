@@ -322,6 +322,25 @@ class CutTilesetSpritesTests(unittest.TestCase):
             self.assertEqual([path.name for path in sheets], ["props.png"])
             self.assertTrue((root / "out" / "_extracted_archives" / "packs" / "props" / "nested" / "props.png").exists())
 
+    def test_discovery_skips_appledouble_metadata_images(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_varied_tileset_sheet(root / "props.png")
+            (root / "._props.png").write_bytes(b"not a png")
+            macosx = root / "__MACOSX"
+            macosx.mkdir()
+            (macosx / "._props.png").write_bytes(b"not a png")
+
+            archive = root / "pack.zip"
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as handle:
+                handle.write(root / "props.png", "nested/props.png")
+                handle.writestr("__MACOSX/nested/._props.png", b"not a png")
+
+            sheets = discover_sheet_files(root, include_archives=True, archive_extract_dir=root / "out" / "_extracted_archives")
+
+            self.assertEqual([path.name for path in sheets], ["props.png", "props.png"])
+            self.assertFalse((root / "out" / "_extracted_archives" / "pack" / "__MACOSX" / "nested" / "._props.png").exists())
+
     def test_discovery_sanitizes_trailing_space_zip_member_folders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

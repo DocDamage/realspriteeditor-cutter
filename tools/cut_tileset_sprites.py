@@ -245,6 +245,10 @@ def _safe_archive_folder_name(path: Path) -> str:
     return name or "archive"
 
 
+def _is_appledouble_metadata_path(path: Path) -> bool:
+    return any(part == "__MACOSX" or part.startswith("._") for part in path.parts)
+
+
 def extract_archive_sheet_files(archive_path: Path, destination_root: Path) -> list[Path]:
     if archive_path.suffix.lower() not in SUPPORTED_ARCHIVE_EXTENSIONS:
         return []
@@ -255,7 +259,12 @@ def extract_archive_sheet_files(archive_path: Path, destination_root: Path) -> l
         with zipfile.ZipFile(archive_path) as archive:
             for member in archive.infolist():
                 relative = _safe_extract_relative_path(member.filename)
-                if relative is None or member.is_dir() or relative.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+                if (
+                    relative is None
+                    or member.is_dir()
+                    or _is_appledouble_metadata_path(relative)
+                    or relative.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS
+                ):
                     continue
                 target = output_root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -298,6 +307,8 @@ def discover_sheet_files(input_path: Path, *, include_archives: bool = False, ar
         if is_generated_output_path(path) or is_inside_spritecut_output(path, input_path):
             continue
         if not path.is_file():
+            continue
+        if _is_appledouble_metadata_path(path):
             continue
         if path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS:
             sheets.append(path)
